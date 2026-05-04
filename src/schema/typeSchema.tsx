@@ -10,7 +10,7 @@ export const playerResourceDtoSchema = {
     "required": ["resourceName", "amount", "playerName"]
 } as const;
 
-export const playerBattleInfoDtoSchema = {
+export const playerBattlePathInfoDtoSchema = {
     "type": "object",
     "properties": {
         "nodes": {

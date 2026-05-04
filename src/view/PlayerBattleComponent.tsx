@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import PlayerBattleService from "../api/PlayerBattleService";
-import { PlayerBattleInfoDto } from "../type/type";
+import { PlayerBattlePathInfoDto } from "../type/type";
 
 type AnimatedMove = {
     id: string;
@@ -17,10 +17,10 @@ type AnimatedMove = {
 export function PlayerBattleComponent() {
     const { playerId } = useParams<"playerId">();
 
-    const [data, setData] = useState<PlayerBattleInfoDto[]>([]);
-    const [prevData, setPrevData] = useState<PlayerBattleInfoDto[]>([]);
+    const [data, setData] = useState<PlayerBattlePathInfoDto[]>([]);
+    const [prevData, setPrevData] = useState<PlayerBattlePathInfoDto[]>([]);
     const [movingUnits, setMovingUnits] = useState<AnimatedMove[]>([]);
-    const [pendingData, setPendingData] = useState<PlayerBattleInfoDto[] | null>(null);
+    const [pendingData, setPendingData] = useState<PlayerBattlePathInfoDto[] | null>(null);
     const [turn, setTurn] = useState(0);
 
     const NODE_SIZE = 80;
@@ -30,7 +30,7 @@ export function PlayerBattleComponent() {
 
     // initial load
     useEffect(() => {
-        PlayerBattleService.getPlayerBattleInfos(playerId ?? "", 0)
+        PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "", 0)
             .then((res: any) => setData(res.data))
             .catch(console.error);
     }, [playerId]);
@@ -40,7 +40,7 @@ export function PlayerBattleComponent() {
         const nextTurn = turn + 1;
         setTurn(nextTurn);
 
-        PlayerBattleService.getPlayerBattleInfos(playerId ?? "", nextTurn)
+        PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "", nextTurn)
             .then((res: any) => {
                 const newData = res.data;
 
@@ -52,8 +52,8 @@ export function PlayerBattleComponent() {
 
     // DETECT MOVEMENTS
     const generateMovements = (
-        oldData: PlayerBattleInfoDto[],
-        newData: PlayerBattleInfoDto[]
+        oldData: PlayerBattlePathInfoDto[],
+        newData: PlayerBattlePathInfoDto[]
     ) => {
         const moves: AnimatedMove[] = [];
 
