@@ -2,6 +2,8 @@ import {PlayerBattlePathInfoDto} from "../type/type";
 import http from "./common";
 const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj));
 
+const isPlayer = (owner: string) => owner.toUpperCase() === "PLAYER";
+
 const moveUnitsOneTurn = (data: PlayerBattlePathInfoDto[]) => {
     const newData = deepClone(data);
 
@@ -15,10 +17,10 @@ const moveUnitsOneTurn = (data: PlayerBattlePathInfoDto[]) => {
             node.groupInfoDtos?.forEach(unit => {
                 let targetIndex = index;
 
-                if (unit.owner === "player") {
-                    targetIndex = Math.max(0, index - 1);
-                } else {
+                if (isPlayer(unit.owner)) {
                     targetIndex = Math.min(nodeCount - 1, index + 1);
+                } else {
+                    targetIndex = Math.max(0, index - 1);
                 }
 
                 // merge units if same type+owner exists

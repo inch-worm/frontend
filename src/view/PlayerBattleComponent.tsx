@@ -14,6 +14,9 @@ type AnimatedMove = {
     fromNodeId: string;
 };
 
+const isEnemy = (owner: string) => owner.toUpperCase() === "ENEMY";
+const isPlayer = (owner: string) => owner.toUpperCase() === "PLAYER";
+
 export function PlayerBattleComponent() {
     const { playerId } = useParams<"playerId">();
 
@@ -76,9 +79,9 @@ export function PlayerBattleComponent() {
                         const diff = newUnit.count - oldCount;
 
                         const sourceIndex =
-                            newUnit.owner === "enemy"
-                                ? nodeIndex - 1
-                                : nodeIndex + 1;
+                            isEnemy(newUnit.owner)
+                                ? nodeIndex + 1
+                                : nodeIndex - 1;
 
                         const sourceNode = oldPath.nodeDtos[sourceIndex];
                         if (!sourceNode) return;
@@ -189,7 +192,7 @@ export function PlayerBattleComponent() {
                         y={uy + 22}
                         fontSize="10"
                         textAnchor="middle"
-                        fill={unit.owner === "player" ? "green" : "red"}
+                        fill={isPlayer(unit.owner) ? "green" : "red"}
                     >
                         {unit.count}
                     </text>
@@ -300,7 +303,7 @@ export function PlayerBattleComponent() {
                                         y={baseY + 20}
                                         fontSize="12"
                                         textAnchor="middle"
-                                        fill={m.owner === "player" ? "green" : "red"}
+                                        fill={isPlayer(m.owner) ? "green" : "red"}
                                         fontWeight="bold"
                                     >
                                         {m.amount}
