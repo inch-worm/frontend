@@ -6,13 +6,13 @@ const moveUnitsOneTurn = (data: PlayerBattlePathInfoDto[]) => {
     const newData = deepClone(data);
 
     newData.forEach((path: PlayerBattlePathInfoDto) => {
-        const nodeCount = path.nodes.length;
+        const nodeCount = path.nodeDtos.length;
 
         // prepare empty units
-        const nextUnits = path.nodes.map(() => [] as any[]);
+        const nextUnits = path.nodeDtos.map(() => [] as any[]);
 
-        path.nodes.forEach((node, index) => {
-            node.unitsInfo?.forEach(unit => {
+        path.nodeDtos.forEach((node, index) => {
+            node.groupInfoDtos?.forEach(unit => {
                 let targetIndex = index;
 
                 if (unit.owner === "player") {
@@ -37,8 +37,8 @@ const moveUnitsOneTurn = (data: PlayerBattlePathInfoDto[]) => {
         });
 
         // assign new units
-        path.nodes.forEach((node, i) => {
-            node.unitsInfo = nextUnits[i];
+        path.nodeDtos.forEach((node, i) => {
+            node.groupInfoDtos = nextUnits[i];
         });
     });
 

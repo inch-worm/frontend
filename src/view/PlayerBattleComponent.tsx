@@ -61,12 +61,12 @@ export function PlayerBattleComponent() {
             const oldPath = oldData[pathIndex];
             if (!oldPath) return;
 
-            path.nodes.forEach((node, nodeIndex) => {
-                const oldNode = oldPath.nodes.find(n => n.id === node.id);
+            path.nodeDtos.forEach((node, nodeIndex) => {
+                const oldNode = oldPath.nodeDtos.find(n => n.id === node.id);
                 if (!oldNode) return;
 
-                node.unitsInfo?.forEach(newUnit => {
-                    const oldUnit = oldNode.unitsInfo?.find(
+                node.groupInfoDtos?.forEach(newUnit => {
+                    const oldUnit = oldNode.groupInfoDtos?.find(
                         u => u.unitType === newUnit.unitType && u.owner === newUnit.owner
                     );
 
@@ -80,7 +80,7 @@ export function PlayerBattleComponent() {
                                 ? nodeIndex - 1
                                 : nodeIndex + 1;
 
-                        const sourceNode = oldPath.nodes[sourceIndex];
+                        const sourceNode = oldPath.nodeDtos[sourceIndex];
                         if (!sourceNode) return;
 
                         moves.push({
@@ -144,7 +144,7 @@ export function PlayerBattleComponent() {
 
     // subtract moving units from source
     const getVisibleUnits = (node: any) => {
-        let units = node.unitsInfo ? [...node.unitsInfo] : [];
+        let units = node.groupInfoDtos ? [...node.groupInfoDtos] : [];
 
         movingUnits.forEach(m => {
             if (m.fromNodeId === node.id) {
@@ -213,9 +213,9 @@ export function PlayerBattleComponent() {
             <svg width={1600} height={1600} style={{ border: "1px solid #ccc" }}>
                 {renderData.map((path, pathIndex) => (
                     <g key={pathIndex}>
-                        {path.edges.map((edge, i) => {
-                            const from = path.nodes.find(n => n.id === edge.fromNodeId);
-                            const to = path.nodes.find(n => n.id === edge.toNodeId);
+                        {path.edgeDtos.map((edge, i) => {
+                            const from = path.nodeDtos.find(n => n.id === edge.fromNodeId);
+                            const to = path.nodeDtos.find(n => n.id === edge.toNodeId);
                             if (!from || !to) return null;
 
                             return (
@@ -231,7 +231,7 @@ export function PlayerBattleComponent() {
                             );
                         })}
 
-                        {path.nodes.map(node => {
+                        {path.nodeDtos.map(node => {
                             const x = node.xCoordinate * SCALE;
                             const y = node.yCoordinate * SCALE + TOP_OFFSET;
 

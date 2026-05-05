@@ -13,7 +13,7 @@ export const playerResourceDtoSchema = {
 export const playerBattlePathInfoDtoSchema = {
     "type": "object",
     "properties": {
-        "nodes": {
+        "nodeDtos": {
             "type": "array",
             "items": {
                 "type": "object",
@@ -27,7 +27,7 @@ export const playerBattlePathInfoDtoSchema = {
                     "yCoordinate": {
                         "type": "integer"
                     },
-                    "unitsInfo": {
+                    "groupInfoDtos": {
                         "type": "array",
                         "items": {
                             "type": "object",
@@ -57,7 +57,7 @@ export const playerBattlePathInfoDtoSchema = {
                 ]
             }
         },
-        "edges": {
+        "edgeDtos": {
             "type": "array",
             "items": {
                 "type": "object",
@@ -77,7 +77,8 @@ export const playerBattlePathInfoDtoSchema = {
         }
     },
     "required": [
-        "nodes",
-        "edges"
+        "nodeDtos",
+        "edgeDtos"
     ]
+
 } as const;
