@@ -131,11 +131,11 @@ export function PlayerBattleComponent() {
     // ICONS
     const getUnitIcon = (type: string) => {
         switch (type) {
-            case "infantry":
+            case "INFANTRY":
                 return "https://i.pinimg.com/736x/bd/bc/29/bdbc29f4820a1d186bcfbaa9bd21e76f.jpg";
-            case "archer":
+            case "ARCHER":
                 return "https://cdna.artstation.com/p/assets/images/images/020/353/934/large/wojciech-pyrek-finished.jpg";
-            case "cavalry":
+            case "CAVALRY":
                 return "https://www.warhistoryonline.com/wp-content/uploads/sites/64/2018/04/cavalry.jpg";
             default:
                 return "https://thumbs.dreamstime.com/b/default-image-icon-vector-missing-picture-page-website-design-mobile-app-no-photo-available-236105299.jpg";
