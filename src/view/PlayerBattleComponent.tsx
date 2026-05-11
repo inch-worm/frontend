@@ -14,8 +14,15 @@ type AnimatedMove = {
     fromNodeId: string;
 };
 
+type GroupInfoDto = NonNullable<
+    PlayerBattlePathInfoDto["nodeDtos"][number]["groupInfoDtos"]
+>[number];
+
 const isEnemy = (owner: string) => owner.toUpperCase() === "ENEMY";
 const isPlayer = (owner: string) => owner.toUpperCase() === "PLAYER";
+
+const unitKey = (unit: { unitType: string; owner: string }) =>
+    `${unit.unitType}:${unit.owner}`;
 
 export function PlayerBattleComponent() {
     const { playerId } = useParams<"playerId">();
@@ -24,33 +31,28 @@ export function PlayerBattleComponent() {
     const [prevData, setPrevData] = useState<PlayerBattlePathInfoDto[]>([]);
     const [movingUnits, setMovingUnits] = useState<AnimatedMove[]>([]);
     const [pendingData, setPendingData] = useState<PlayerBattlePathInfoDto[] | null>(null);
-    const [turn, setTurn] = useState(0);
 
     const NODE_SIZE = 80;
     const IMAGE_SIZE = 24;
     const SCALE = 100;
     const TOP_OFFSET = 100;
 
-    // initial load
     useEffect(() => {
-        PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "", 0)
-            .then((res: any) => setData(res.data))
+        PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "")
+            .then((res: any) => setData(Array.isArray(res.data) ? res.data : []))
             .catch(console.error);
     }, [playerId]);
 
-    // NEXT TURN
     const handleNextTurn = () => {
-        const nextTurn = turn + 1;
-        setTurn(nextTurn);
-
-        PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "", nextTurn)
+        PlayerBattleService.playerBattlePathNextTurn(playerId ?? "")
             .then((res: any) => {
-                const newData = res.data;
+                const newData = Array.isArray(res.data) ? res.data : [];
 
                 setPrevData(data);
                 generateMovements(data, newData);
                 setPendingData(newData);
-            });
+            })
+            .catch(console.error);
     };
 
     // DETECT MOVEMENTS
@@ -64,26 +66,41 @@ export function PlayerBattleComponent() {
             const oldPath = oldData[pathIndex];
             if (!oldPath) return;
 
-            path.nodeDtos.forEach((node, nodeIndex) => {
-                const oldNode = oldPath.nodeDtos.find(n => n.id === node.id);
+            path.nodeDtos?.forEach((node) => {
+                const oldNode = oldPath.nodeDtos?.find(n => n.id === node.id);
                 if (!oldNode) return;
 
-                node.groupInfoDtos?.forEach(newUnit => {
-                    const oldUnit = oldNode.groupInfoDtos?.find(
-                        u => u.unitType === newUnit.unitType && u.owner === newUnit.owner
+                const oldUnitsByKey = new Map<string, number>();
+                oldNode.groupInfoDtos?.forEach(unit => {
+                    oldUnitsByKey.set(
+                        unitKey(unit),
+                        (oldUnitsByKey.get(unitKey(unit)) ?? 0) + unit.count
                     );
+                });
 
-                    const oldCount = oldUnit?.count ?? 0;
+                const newUnitsByKey = new Map<string, GroupInfoDto>();
+                node.groupInfoDtos?.forEach(unit => {
+                    const key = unitKey(unit);
+                    const existing = newUnitsByKey.get(key);
+                    newUnitsByKey.set(key, {
+                        ...unit,
+                        count: (existing?.count ?? 0) + unit.count
+                    });
+                });
+
+                newUnitsByKey.forEach(newUnit => {
+                    const oldCount = oldUnitsByKey.get(unitKey(newUnit)) ?? 0;
 
                     if (newUnit.count > oldCount) {
                         const diff = newUnit.count - oldCount;
 
-                        const sourceIndex =
-                            isEnemy(newUnit.owner)
-                                ? nodeIndex + 1
-                                : nodeIndex - 1;
-
-                        const sourceNode = oldPath.nodeDtos[sourceIndex];
+                        const sourceEdge = isEnemy(newUnit.owner)
+                            ? oldPath.edgeDtos?.find(edge => edge.fromNodeId === node.id)
+                            : oldPath.edgeDtos?.find(edge => edge.toNodeId === node.id);
+                        const sourceNodeId = isEnemy(newUnit.owner)
+                            ? sourceEdge?.toNodeId
+                            : sourceEdge?.fromNodeId;
+                        const sourceNode = oldPath.nodeDtos?.find(n => n.id === sourceNodeId);
                         if (!sourceNode) return;
 
                         moves.push({
@@ -147,7 +164,9 @@ export function PlayerBattleComponent() {
 
     // subtract moving units from source
     const getVisibleUnits = (node: any) => {
-        let units = node.groupInfoDtos ? [...node.groupInfoDtos] : [];
+        let units: GroupInfoDto[] = node.groupInfoDtos
+            ? node.groupInfoDtos.map((unit: GroupInfoDto) => ({ ...unit }))
+            : [];
 
         movingUnits.forEach(m => {
             if (m.fromNodeId === node.id) {
@@ -162,7 +181,7 @@ export function PlayerBattleComponent() {
             }
         });
 
-        return units.filter(u => u.count > 0);
+        return units.filter((unit: GroupInfoDto) => unit.count > 0);
     };
 
     // render node units
@@ -202,6 +221,7 @@ export function PlayerBattleComponent() {
     };
 
     const renderData = movingUnits.length > 0 ? prevData : data;
+    const pathsToRender = Array.isArray(renderData) ? renderData : [];
 
     return (
         <div style={{ textAlign: "center", paddingTop: "20px" }}>
@@ -214,11 +234,11 @@ export function PlayerBattleComponent() {
             </button>
 
             <svg width={1600} height={1600} style={{ border: "1px solid #ccc" }}>
-                {renderData.map((path, pathIndex) => (
+                {pathsToRender.map((path, pathIndex) => (
                     <g key={pathIndex}>
-                        {path.edgeDtos.map((edge, i) => {
-                            const from = path.nodeDtos.find(n => n.id === edge.fromNodeId);
-                            const to = path.nodeDtos.find(n => n.id === edge.toNodeId);
+                        {(path.edgeDtos ?? []).map((edge, i) => {
+                            const from = path.nodeDtos?.find(n => n.id === edge.fromNodeId);
+                            const to = path.nodeDtos?.find(n => n.id === edge.toNodeId);
                             if (!from || !to) return null;
 
                             return (
@@ -234,7 +254,7 @@ export function PlayerBattleComponent() {
                             );
                         })}
 
-                        {path.nodeDtos.map(node => {
+                        {(path.nodeDtos ?? []).map(node => {
                             const x = node.xCoordinate * SCALE;
                             const y = node.yCoordinate * SCALE + TOP_OFFSET;
 

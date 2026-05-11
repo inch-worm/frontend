@@ -1,68 +1,18 @@
 import {PlayerBattlePathInfoDto} from "../type/type";
 import http from "./common";
-const deepClone = (obj: any) => JSON.parse(JSON.stringify(obj));
 
-const isPlayer = (owner: string) => owner.toUpperCase() === "PLAYER";
-
-const moveUnitsOneTurn = (data: PlayerBattlePathInfoDto[]) => {
-    const newData = deepClone(data);
-
-    newData.forEach((path: PlayerBattlePathInfoDto) => {
-        const nodeCount = path.nodeDtos.length;
-
-        // prepare empty units
-        const nextUnits = path.nodeDtos.map(() => [] as any[]);
-
-        path.nodeDtos.forEach((node, index) => {
-            node.groupInfoDtos?.forEach(unit => {
-                let targetIndex = index;
-
-                if (isPlayer(unit.owner)) {
-                    targetIndex = Math.min(nodeCount - 1, index + 1);
-                } else {
-                    targetIndex = Math.max(0, index - 1);
-                }
-
-                // merge units if same type+owner exists
-                const existing = nextUnits[targetIndex].find(
-                    (u: any) =>
-                        u.unitType === unit.unitType &&
-                        u.owner === unit.owner
-                );
-
-                if (existing) {
-                    existing.count += unit.count;
-                } else {
-                    nextUnits[targetIndex].push({ ...unit });
-                }
-            });
-        });
-
-        // assign new units
-        path.nodeDtos.forEach((node, i) => {
-            node.groupInfoDtos = nextUnits[i];
-        });
-    });
-
-    return newData;
+const getPlayerBattlePathInfoDtos = async (playerId: any) => {
+    return http.get<Array<PlayerBattlePathInfoDto>>(`/playerBattlePathInfoDtos/${playerId}`);
 };
 
-const getPlayerBattlePathInfoDtos = async (playerId: any, turn: number = 0) => {
-    const response = await http.get<Array<PlayerBattlePathInfoDto>>(
-        `/playerBattlePathInfoDtos/${playerId}`
-    );
-
-    let data = deepClone(response.data); // ✅ THIS is your array
-
-    for (let i = 0; i < turn; i++) {
-        data = moveUnitsOneTurn(data);
-    }
-
-    return { data };
+const playerBattlePathNextTurn = async (playerId: any) => {
+    return http.post<Array<PlayerBattlePathInfoDto>>(`/playerBattlePathNextTurn/${playerId}`);
 };
+
 
 const PlayerBattleService = {
-    getPlayerBattlePathInfoDtos: getPlayerBattlePathInfoDtos
+    getPlayerBattlePathInfoDtos: getPlayerBattlePathInfoDtos,
+    playerBattlePathNextTurn: playerBattlePathNextTurn
 };
 
 export default PlayerBattleService;
