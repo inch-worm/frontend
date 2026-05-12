@@ -17,12 +17,27 @@ type AnimatedMove = {
 type GroupInfoDto = NonNullable<
     PlayerBattlePathInfoDto["nodeDtos"][number]["groupInfoDtos"]
 >[number];
+type NodeDto = PlayerBattlePathInfoDto["nodeDtos"][number];
+type EdgeDto = PlayerBattlePathInfoDto["edgeDtos"][number];
 
 const isEnemy = (owner: string) => owner.toUpperCase() === "ENEMY";
 const isPlayer = (owner: string) => owner.toUpperCase() === "PLAYER";
 
-const unitKey = (unit: { unitType: string; owner: string }) =>
-    `${unit.unitType}:${unit.owner}`;
+const getDestinationNodeId = (
+    owner: string,
+    nodeId: string,
+    edges: EdgeDto[] = []
+) => {
+    if (isEnemy(owner)) {
+        return edges.find(edge => edge.fromNodeId === nodeId)?.toNodeId;
+    }
+
+    if (isPlayer(owner)) {
+        return edges.find(edge => edge.toNodeId === nodeId)?.fromNodeId;
+    }
+
+    return undefined;
+};
 
 export function PlayerBattleComponent() {
     const { playerId } = useParams<"playerId">();
@@ -31,11 +46,13 @@ export function PlayerBattleComponent() {
     const [prevData, setPrevData] = useState<PlayerBattlePathInfoDto[]>([]);
     const [movingUnits, setMovingUnits] = useState<AnimatedMove[]>([]);
     const [pendingData, setPendingData] = useState<PlayerBattlePathInfoDto[] | null>(null);
+    const [animationStartedAt, setAnimationStartedAt] = useState<number | null>(null);
 
     const NODE_SIZE = 80;
     const IMAGE_SIZE = 24;
     const SCALE = 100;
     const TOP_OFFSET = 100;
+    const MOVE_ANIMATION_DURATION_MS = 700;
 
     useEffect(() => {
         PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "")
@@ -44,13 +61,24 @@ export function PlayerBattleComponent() {
     }, [playerId]);
 
     const handleNextTurn = () => {
+        if (movingUnits.length > 0 || pendingData) {
+            return;
+        }
+
         PlayerBattleService.playerBattlePathNextTurn(playerId ?? "")
             .then((res: any) => {
                 const newData = Array.isArray(res.data) ? res.data : [];
+                const moves = generateMovements(data, newData);
+
+                if (moves.length === 0) {
+                    setData(newData);
+                    return;
+                }
 
                 setPrevData(data);
-                generateMovements(data, newData);
+                setMovingUnits(moves);
                 setPendingData(newData);
+                setAnimationStartedAt(null);
             })
             .catch(console.error);
     };
@@ -62,69 +90,49 @@ export function PlayerBattleComponent() {
     ) => {
         const moves: AnimatedMove[] = [];
 
-        newData.forEach((path, pathIndex) => {
-            const oldPath = oldData[pathIndex];
-            if (!oldPath) return;
+        oldData.forEach((oldPath, pathIndex) => {
+            const newPath = newData[pathIndex];
+            const oldNodesById = new Map<string, NodeDto>(
+                oldPath.nodeDtos?.map(node => [node.id, node]) ?? []
+            );
+            const newNodesById = new Map<string, NodeDto>(
+                newPath?.nodeDtos?.map(node => [node.id, node]) ?? []
+            );
 
-            path.nodeDtos?.forEach((node) => {
-                const oldNode = oldPath.nodeDtos?.find(n => n.id === node.id);
-                if (!oldNode) return;
-
-                const oldUnitsByKey = new Map<string, number>();
-                oldNode.groupInfoDtos?.forEach(unit => {
-                    oldUnitsByKey.set(
-                        unitKey(unit),
-                        (oldUnitsByKey.get(unitKey(unit)) ?? 0) + unit.count
+            oldPath.nodeDtos?.forEach(sourceNode => {
+                sourceNode.groupInfoDtos?.forEach(unit => {
+                    const destinationNodeId = getDestinationNodeId(
+                        unit.owner,
+                        sourceNode.id,
+                        oldPath.edgeDtos ?? []
                     );
-                });
+                    if (!destinationNodeId) return;
 
-                const newUnitsByKey = new Map<string, GroupInfoDto>();
-                node.groupInfoDtos?.forEach(unit => {
-                    const key = unitKey(unit);
-                    const existing = newUnitsByKey.get(key);
-                    newUnitsByKey.set(key, {
-                        ...unit,
-                        count: (existing?.count ?? 0) + unit.count
+                    const destinationNode =
+                        newNodesById.get(destinationNodeId) ?? oldNodesById.get(destinationNodeId);
+                    if (!destinationNode) return;
+
+                    moves.push({
+                        id: `${pathIndex}-${sourceNode.id}-${destinationNode.id}-${unit.unitType}-${unit.owner}-${moves.length}`,
+                        from: {
+                            x: sourceNode.xCoordinate,
+                            y: sourceNode.yCoordinate
+                        },
+                        to: {
+                            x: destinationNode.xCoordinate,
+                            y: destinationNode.yCoordinate
+                        },
+                        progress: 0,
+                        unitType: unit.unitType,
+                        owner: unit.owner,
+                        amount: unit.count,
+                        fromNodeId: sourceNode.id
                     });
-                });
-
-                newUnitsByKey.forEach(newUnit => {
-                    const oldCount = oldUnitsByKey.get(unitKey(newUnit)) ?? 0;
-
-                    if (newUnit.count > oldCount) {
-                        const diff = newUnit.count - oldCount;
-
-                        const sourceEdge = isEnemy(newUnit.owner)
-                            ? oldPath.edgeDtos?.find(edge => edge.fromNodeId === node.id)
-                            : oldPath.edgeDtos?.find(edge => edge.toNodeId === node.id);
-                        const sourceNodeId = isEnemy(newUnit.owner)
-                            ? sourceEdge?.toNodeId
-                            : sourceEdge?.fromNodeId;
-                        const sourceNode = oldPath.nodeDtos?.find(n => n.id === sourceNodeId);
-                        if (!sourceNode) return;
-
-                        moves.push({
-                            id: `${pathIndex}-${node.id}-${newUnit.unitType}-${newUnit.owner}-${Math.random()}`,
-                            from: {
-                                x: sourceNode.xCoordinate,
-                                y: sourceNode.yCoordinate
-                            },
-                            to: {
-                                x: node.xCoordinate,
-                                y: node.yCoordinate
-                            },
-                            progress: 0,
-                            unitType: newUnit.unitType,
-                            owner: newUnit.owner,
-                            amount: diff,
-                            fromNodeId: sourceNode.id
-                        });
-                    }
                 });
             });
         });
 
-        setMovingUnits(moves);
+        return moves;
     };
 
     // ANIMATION LOOP
@@ -137,16 +145,32 @@ export function PlayerBattleComponent() {
             return;
         }
 
-        const interval = setInterval(() => {
-            setMovingUnits(prev =>
-                prev
-                    .map(m => ({ ...m, progress: m.progress + 0.03 }))
-                    .filter(m => m.progress < 1)
-            );
-        }, 30);
+        let animationFrameId: number;
 
-        return () => clearInterval(interval);
-    }, [movingUnits, pendingData]);
+        const tick = (timestamp: number) => {
+            const startedAt = animationStartedAt ?? timestamp;
+            if (animationStartedAt === null) {
+                setAnimationStartedAt(startedAt);
+            }
+
+            const progress = Math.min(
+                (timestamp - startedAt) / MOVE_ANIMATION_DURATION_MS,
+                1
+            );
+
+            setMovingUnits(prev =>
+                progress >= 1 ? [] : prev.map(m => ({ ...m, progress }))
+            );
+
+            if (progress < 1) {
+                animationFrameId = requestAnimationFrame(tick);
+            }
+        };
+
+        animationFrameId = requestAnimationFrame(tick);
+
+        return () => cancelAnimationFrame(animationFrameId);
+    }, [animationStartedAt, movingUnits.length, pendingData]);
 
     // ICONS
     const getUnitIcon = (type: string) => {
@@ -229,7 +253,11 @@ export function PlayerBattleComponent() {
                 Player: {playerId}
             </h2>
 
-            <button onClick={handleNextTurn} style={{ marginBottom: "20px" }}>
+            <button
+                onClick={handleNextTurn}
+                disabled={movingUnits.length > 0 || pendingData !== null}
+                style={{ marginBottom: "20px" }}
+            >
                 Next Turn
             </button>
 
