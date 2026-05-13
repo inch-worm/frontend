@@ -39,6 +39,15 @@ const getDestinationNodeId = (
     return undefined;
 };
 
+const getGroupCount = (
+    node: NodeDto | undefined,
+    unitType: string,
+    owner: string
+) =>
+    node?.groupInfoDtos?.find(
+        group => group.unitType === unitType && group.owner === owner
+    )?.count ?? 0;
+
 export function PlayerBattleComponent() {
     const { playerId } = useParams<"playerId">();
 
@@ -101,17 +110,30 @@ export function PlayerBattleComponent() {
 
             oldPath.nodeDtos?.forEach(sourceNode => {
                 sourceNode.groupInfoDtos?.forEach(unit => {
+                    const newSourceCount = getGroupCount(
+                        newNodesById.get(sourceNode.id),
+                        unit.unitType,
+                        unit.owner
+                    );
+                    const movedAmount = unit.count - newSourceCount;
+                    if (movedAmount <= 0) {
+                        return;
+                    }
+
                     const destinationNodeId = getDestinationNodeId(
                         unit.owner,
                         sourceNode.id,
                         oldPath.edgeDtos ?? []
                     );
-                    if (!destinationNodeId) return;
+                    if (!destinationNodeId) {
+                        return;
+                    }
 
                     const destinationNode =
                         newNodesById.get(destinationNodeId) ?? oldNodesById.get(destinationNodeId);
-                    if (!destinationNode) return;
-
+                    if (!destinationNode) {
+                        return;
+                    }
                     moves.push({
                         id: `${pathIndex}-${sourceNode.id}-${destinationNode.id}-${unit.unitType}-${unit.owner}-${moves.length}`,
                         from: {
@@ -125,7 +147,7 @@ export function PlayerBattleComponent() {
                         progress: 0,
                         unitType: unit.unitType,
                         owner: unit.owner,
-                        amount: unit.count,
+                        amount: movedAmount,
                         fromNodeId: sourceNode.id
                     });
                 });
@@ -135,7 +157,6 @@ export function PlayerBattleComponent() {
         return moves;
     };
 
-    // ANIMATION LOOP
     useEffect(() => {
         if (movingUnits.length === 0) {
             if (pendingData) {
