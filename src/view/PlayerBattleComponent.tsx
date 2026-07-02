@@ -8,10 +8,17 @@ type AnimatedMove = {
     from: { x: number; y: number };
     to: { x: number; y: number };
     progress: number;
+    durationMs: number;
     unitType: string;
     owner: string;
     amount: number;
     fromNodeId: string;
+    toNodeId: string;
+    fightOpponents?: {
+        unitType: string;
+        owner: string;
+        amount: number;
+    }[];
 };
 
 type GroupInfoDto = NonNullable<
@@ -22,6 +29,8 @@ type EdgeDto = PlayerBattlePathInfoDto["edgeDtos"][number];
 
 const isEnemy = (owner: string) => owner.toUpperCase() === "ENEMY";
 const isPlayer = (owner: string) => owner.toUpperCase() === "PLAYER";
+const areOpponents = (firstOwner: string, secondOwner: string) =>
+    firstOwner.toUpperCase() !== secondOwner.toUpperCase();
 
 const getDestinationNodeId = (
     owner: string,
@@ -62,6 +71,7 @@ export function PlayerBattleComponent() {
     const SCALE = 100;
     const TOP_OFFSET = 100;
     const MOVE_ANIMATION_DURATION_MS = 700;
+    const FIGHT_ANIMATION_DURATION_MS = 1600;
 
     useEffect(() => {
         PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "")
@@ -134,6 +144,12 @@ export function PlayerBattleComponent() {
                     if (!destinationNode) {
                         return;
                     }
+                    const oldDestinationNode = oldNodesById.get(destinationNodeId);
+                    const fightOpponents = oldDestinationNode?.groupInfoDtos?.filter(
+                        group => areOpponents(group.owner, unit.owner) && group.count > 0
+                    );
+                    const hasFight = Boolean(fightOpponents?.length);
+
                     moves.push({
                         id: `${pathIndex}-${sourceNode.id}-${destinationNode.id}-${unit.unitType}-${unit.owner}-${moves.length}`,
                         from: {
@@ -145,10 +161,21 @@ export function PlayerBattleComponent() {
                             y: destinationNode.yCoordinate
                         },
                         progress: 0,
+                        durationMs: hasFight
+                            ? FIGHT_ANIMATION_DURATION_MS
+                            : MOVE_ANIMATION_DURATION_MS,
                         unitType: unit.unitType,
                         owner: unit.owner,
                         amount: movedAmount,
-                        fromNodeId: sourceNode.id
+                        fromNodeId: sourceNode.id,
+                        toNodeId: destinationNode.id,
+                        fightOpponents: hasFight
+                            ? fightOpponents?.map(group => ({
+                                unitType: group.unitType,
+                                owner: group.owner,
+                                amount: group.count
+                            }))
+                            : undefined
                     });
                 });
             });
@@ -156,6 +183,11 @@ export function PlayerBattleComponent() {
 
         return moves;
     };
+
+    const activeAnimationDurationMs = movingUnits.reduce(
+        (maxDurationMs, move) => Math.max(maxDurationMs, move.durationMs),
+        0
+    );
 
     useEffect(() => {
         if (movingUnits.length === 0) {
@@ -174,16 +206,18 @@ export function PlayerBattleComponent() {
                 setAnimationStartedAt(startedAt);
             }
 
-            const progress = Math.min(
-                (timestamp - startedAt) / MOVE_ANIMATION_DURATION_MS,
-                1
-            );
+            const elapsedMs = timestamp - startedAt;
 
             setMovingUnits(prev =>
-                progress >= 1 ? [] : prev.map(m => ({ ...m, progress }))
+                prev
+                    .map(m => ({
+                        ...m,
+                        progress: Math.min(elapsedMs / m.durationMs, 1)
+                    }))
+                    .filter(m => m.progress < 1)
             );
 
-            if (progress < 1) {
+            if (elapsedMs < activeAnimationDurationMs) {
                 animationFrameId = requestAnimationFrame(tick);
             }
         };
@@ -191,7 +225,7 @@ export function PlayerBattleComponent() {
         animationFrameId = requestAnimationFrame(tick);
 
         return () => cancelAnimationFrame(animationFrameId);
-    }, [animationStartedAt, movingUnits.length, pendingData]);
+    }, [activeAnimationDurationMs, animationStartedAt, movingUnits.length, pendingData]);
 
     // ICONS
     const getUnitIcon = (type: string) => {
@@ -212,6 +246,7 @@ export function PlayerBattleComponent() {
         let units: GroupInfoDto[] = node.groupInfoDtos
             ? node.groupInfoDtos.map((unit: GroupInfoDto) => ({ ...unit }))
             : [];
+        const hiddenFightDefenders = new Map<string, number>();
 
         movingUnits.forEach(m => {
             if (m.fromNodeId === node.id) {
@@ -223,6 +258,28 @@ export function PlayerBattleComponent() {
                 if (u) {
                     u.count -= m.amount;
                 }
+            }
+
+            if (m.toNodeId === node.id) {
+                m.fightOpponents?.forEach(defender => {
+                    const key = `${defender.unitType}-${defender.owner}`;
+                    hiddenFightDefenders.set(
+                        key,
+                        Math.max(hiddenFightDefenders.get(key) ?? 0, defender.amount)
+                    );
+                });
+            }
+        });
+
+        hiddenFightDefenders.forEach((amount, key) => {
+            const [unitType, owner] = key.split("-");
+            const defender = units.find(
+                (unit: GroupInfoDto) =>
+                    unit.unitType === unitType && unit.owner === owner
+            );
+
+            if (defender) {
+                defender.count -= amount;
             }
         });
 
@@ -340,13 +397,131 @@ export function PlayerBattleComponent() {
                     const grouped: Record<string, AnimatedMove[]> = {};
 
                     movingUnits.forEach(m => {
-                        const key = `${m.from.x},${m.from.y}->${m.to.x},${m.to.y}`;
+                        const hasFight = Boolean(m.fightOpponents?.length);
+                        const edgeNodeIds = [m.fromNodeId, m.toNodeId].sort();
+                        const key = hasFight
+                            ? `fight-${edgeNodeIds[0]}-${edgeNodeIds[1]}`
+                            : `move-${m.from.x},${m.from.y}->${m.to.x},${m.to.y}`;
                         if (!grouped[key]) grouped[key] = [];
                         grouped[key].push(m);
                     });
 
-                    return Object.values(grouped).flatMap(group =>
-                        group.map((m, index) => {
+                    return Object.values(grouped).flatMap(group => {
+                        const firstMove = group[0];
+                        const hasFight = group.some(m => m.fightOpponents?.length);
+
+                        if (hasFight) {
+                            const participantsBySide = {
+                                player: new Map<string, { unitType: string; owner: string; amount: number }>(),
+                                enemy: new Map<string, { unitType: string; owner: string; amount: number }>()
+                            };
+                            const addParticipant = (participant: {
+                                unitType: string;
+                                owner: string;
+                                amount: number;
+                            }) => {
+                                const side = isPlayer(participant.owner) ? "player" : "enemy";
+                                const key = `${participant.unitType}-${participant.owner}`;
+                                const current = participantsBySide[side].get(key);
+
+                                participantsBySide[side].set(key, {
+                                    ...participant,
+                                    amount: Math.max(current?.amount ?? 0, participant.amount)
+                                });
+                            };
+
+                            group.forEach(m => {
+                                addParticipant({
+                                    unitType: m.unitType,
+                                    owner: m.owner,
+                                    amount: m.amount
+                                });
+                                m.fightOpponents?.forEach(addParticipant);
+                            });
+
+                            const playerUnits = Array.from(participantsBySide.player.values());
+                            const enemyUnits = Array.from(participantsBySide.enemy.values());
+                            const x1 = firstMove.from.x * SCALE;
+                            const y1 = firstMove.from.y * SCALE + TOP_OFFSET;
+                            const x2 = firstMove.to.x * SCALE;
+                            const y2 = firstMove.to.y * SCALE + TOP_OFFSET;
+                            const centerX = x1 + (x2 - x1) / 2;
+                            const centerY = y1 + (y2 - y1) / 2;
+                            const progress = Math.max(...group.map(m => m.progress));
+                            const contactProgress =
+                                progress < 0.3
+                                    ? progress / 0.3
+                                    : progress < 0.7
+                                        ? 1
+                                        : 1 - (progress - 0.7) / 0.3;
+                            const safeContactProgress = Math.max(
+                                0,
+                                Math.min(contactProgress, 1)
+                            );
+                            const attackerX = centerX - 44 + safeContactProgress * 24;
+                            const defenderX = centerX + 44 - safeContactProgress * 24;
+                            const rowSpacing = 34;
+
+                            return [
+                                <g key={`fight-${firstMove.id}`}>
+                                    {playerUnits.map((unit, index) => {
+                                        const yOffset =
+                                            (index - (playerUnits.length - 1) / 2) * rowSpacing;
+
+                                        return (
+                                            <g key={`player-${unit.unitType}-${unit.owner}`}>
+                                                <image
+                                                    href={getUnitIcon(unit.unitType)}
+                                                    x={attackerX - 15}
+                                                    y={centerY + yOffset - 17}
+                                                    width={30}
+                                                    height={30}
+                                                />
+                                                <text
+                                                    x={attackerX}
+                                                    y={centerY + yOffset + 22}
+                                                    fontSize="12"
+                                                    textAnchor="middle"
+                                                    fill="green"
+                                                    fontWeight="bold"
+                                                >
+                                                    {unit.amount}
+                                                </text>
+                                            </g>
+                                        );
+                                    })}
+
+                                    {enemyUnits.map((unit, index) => {
+                                        const yOffset =
+                                            (index - (enemyUnits.length - 1) / 2) * rowSpacing;
+
+                                        return (
+                                            <g key={`enemy-${unit.unitType}-${unit.owner}`}>
+                                                <image
+                                                    href={getUnitIcon(unit.unitType)}
+                                                    x={defenderX - 15}
+                                                    y={centerY + yOffset - 17}
+                                                    width={30}
+                                                    height={30}
+                                                />
+                                                <text
+                                                    x={defenderX}
+                                                    y={centerY + yOffset + 22}
+                                                    fontSize="12"
+                                                    textAnchor="middle"
+                                                    fill="red"
+                                                    fontWeight="bold"
+                                                >
+                                                    {unit.amount}
+                                                </text>
+                                            </g>
+                                        );
+                                    })}
+                                </g>
+                            ];
+                        }
+
+                        return group.map((m, index) => {
                             const x1 = m.from.x * SCALE;
                             const y1 = m.from.y * SCALE + TOP_OFFSET;
                             const x2 = m.to.x * SCALE;
@@ -354,7 +529,6 @@ export function PlayerBattleComponent() {
 
                             const baseX = x1 + (x2 - x1) * m.progress;
                             const baseY = y1 + (y2 - y1) * m.progress;
-
                             const offset = (index - (group.length - 1) / 2) * 30;
 
                             return (
@@ -379,8 +553,8 @@ export function PlayerBattleComponent() {
                                     </text>
                                 </g>
                             );
-                        })
-                    );
+                        });
+                    });
                 })()}
             </svg>
         </div>
