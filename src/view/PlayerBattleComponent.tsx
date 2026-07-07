@@ -12,6 +12,7 @@ type AnimatedMove = {
     unitType: string;
     owner: string;
     amount: number;
+    fromAmount: number;
     fromNodeId: string;
     toNodeId: string;
     fightOpponents?: {
@@ -72,6 +73,10 @@ export function PlayerBattleComponent() {
     const TOP_OFFSET = 100;
     const MOVE_ANIMATION_DURATION_MS = 700;
     const FIGHT_ANIMATION_DURATION_MS = 1600;
+    const POST_FIGHT_MOVE_ANIMATION_DURATION_MS = 700;
+    const FIGHT_PHASE_RATIO =
+        FIGHT_ANIMATION_DURATION_MS /
+        (FIGHT_ANIMATION_DURATION_MS + POST_FIGHT_MOVE_ANIMATION_DURATION_MS);
 
     useEffect(() => {
         PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "")
@@ -149,6 +154,19 @@ export function PlayerBattleComponent() {
                         group => areOpponents(group.owner, unit.owner) && group.count > 0
                     );
                     const hasFight = Boolean(fightOpponents?.length);
+                    const oldDestinationCount = getGroupCount(
+                        oldDestinationNode,
+                        unit.unitType,
+                        unit.owner
+                    );
+                    const newDestinationCount = getGroupCount(
+                        newNodesById.get(destinationNodeId),
+                        unit.unitType,
+                        unit.owner
+                    );
+                    const animatedAmount = hasFight
+                        ? Math.max(newDestinationCount - oldDestinationCount, 0)
+                        : movedAmount;
 
                     moves.push({
                         id: `${pathIndex}-${sourceNode.id}-${destinationNode.id}-${unit.unitType}-${unit.owner}-${moves.length}`,
@@ -162,11 +180,13 @@ export function PlayerBattleComponent() {
                         },
                         progress: 0,
                         durationMs: hasFight
-                            ? FIGHT_ANIMATION_DURATION_MS
+                            ? FIGHT_ANIMATION_DURATION_MS +
+                            (animatedAmount > 0 ? POST_FIGHT_MOVE_ANIMATION_DURATION_MS : 0)
                             : MOVE_ANIMATION_DURATION_MS,
                         unitType: unit.unitType,
                         owner: unit.owner,
-                        amount: movedAmount,
+                        amount: animatedAmount,
+                        fromAmount: movedAmount,
                         fromNodeId: sourceNode.id,
                         toNodeId: destinationNode.id,
                         fightOpponents: hasFight
@@ -256,7 +276,7 @@ export function PlayerBattleComponent() {
                 );
 
                 if (u) {
-                    u.count -= m.amount;
+                    u.count -= m.fromAmount;
                 }
             }
 
@@ -434,7 +454,7 @@ export function PlayerBattleComponent() {
                                 addParticipant({
                                     unitType: m.unitType,
                                     owner: m.owner,
-                                    amount: m.amount
+                                    amount: m.fromAmount
                                 });
                                 m.fightOpponents?.forEach(addParticipant);
                             });
@@ -447,39 +467,82 @@ export function PlayerBattleComponent() {
                             const y2 = firstMove.to.y * SCALE + TOP_OFFSET;
                             const centerX = x1 + (x2 - x1) / 2;
                             const centerY = y1 + (y2 - y1) / 2;
-                            const progress = Math.max(...group.map(m => m.progress));
+                            const groupDurationMs = Math.max(...group.map(m => m.durationMs));
+                            const groupElapsedMs = Math.max(
+                                ...group.map(m => m.progress * m.durationMs)
+                            );
+                            const progress = groupElapsedMs / groupDurationMs;
+                            const survivingMoves = group.filter(m => m.amount > 0);
+                            const fightPhaseRatio =
+                                survivingMoves.length > 0 ? FIGHT_PHASE_RATIO : 1;
+                            const fightProgress = Math.min(progress / fightPhaseRatio, 1);
+                            const postFightProgress = Math.max(
+                                0,
+                                Math.min(
+                                    (progress - fightPhaseRatio) / (1 - fightPhaseRatio || 1),
+                                    1
+                                )
+                            );
                             const contactProgress =
-                                progress < 0.3
-                                    ? progress / 0.3
-                                    : progress < 0.7
+                                fightProgress < 0.3
+                                    ? fightProgress / 0.3
+                                    : fightProgress < 0.7
                                         ? 1
-                                        : 1 - (progress - 0.7) / 0.3;
+                                        : 1 - (fightProgress - 0.7) / 0.3;
                             const safeContactProgress = Math.max(
                                 0,
                                 Math.min(contactProgress, 1)
                             );
-                            const attackerX = centerX - 44 + safeContactProgress * 24;
-                            const defenderX = centerX + 44 - safeContactProgress * 24;
+                            const topY = centerY - 44 + safeContactProgress * 24;
+                            const bottomY = centerY + 44 - safeContactProgress * 24;
                             const rowSpacing = 34;
+                            const fightFinished = progress >= fightPhaseRatio;
 
                             return [
                                 <g key={`fight-${firstMove.id}`}>
-                                    {playerUnits.map((unit, index) => {
-                                        const yOffset =
+                                    {!fightFinished && enemyUnits.map((unit, index) => {
+                                        const xOffset =
+                                            (index - (enemyUnits.length - 1) / 2) * rowSpacing;
+
+                                        return (
+                                            <g key={`enemy-${unit.unitType}-${unit.owner}`}>
+                                                <image
+                                                    href={getUnitIcon(unit.unitType)}
+                                                    x={centerX + xOffset - 15}
+                                                    y={topY - 17}
+                                                    width={30}
+                                                    height={30}
+                                                />
+                                                <text
+                                                    x={centerX + xOffset}
+                                                    y={topY + 22}
+                                                    fontSize="12"
+                                                    textAnchor="middle"
+                                                    fill="red"
+                                                    fontWeight="bold"
+                                                >
+                                                    {unit.amount}
+                                                </text>
+                                            </g>
+                                        );
+                                    })}
+
+                                    {!fightFinished && playerUnits.map((unit, index) => {
+                                        const xOffset =
                                             (index - (playerUnits.length - 1) / 2) * rowSpacing;
 
                                         return (
                                             <g key={`player-${unit.unitType}-${unit.owner}`}>
                                                 <image
                                                     href={getUnitIcon(unit.unitType)}
-                                                    x={attackerX - 15}
-                                                    y={centerY + yOffset - 17}
+                                                    x={centerX + xOffset - 15}
+                                                    y={bottomY - 17}
                                                     width={30}
                                                     height={30}
                                                 />
                                                 <text
-                                                    x={attackerX}
-                                                    y={centerY + yOffset + 22}
+                                                    x={centerX + xOffset}
+                                                    y={bottomY + 22}
                                                     fontSize="12"
                                                     textAnchor="middle"
                                                     fill="green"
@@ -491,28 +554,35 @@ export function PlayerBattleComponent() {
                                         );
                                     })}
 
-                                    {enemyUnits.map((unit, index) => {
-                                        const yOffset =
-                                            (index - (enemyUnits.length - 1) / 2) * rowSpacing;
+                                    {fightFinished && survivingMoves.map((m, index) => {
+                                        const destinationX = m.to.x * SCALE;
+                                        const destinationY = m.to.y * SCALE + TOP_OFFSET;
+                                        const baseX =
+                                            centerX + (destinationX - centerX) * postFightProgress;
+                                        const baseY =
+                                            centerY + (destinationY - centerY) * postFightProgress;
+                                        const offset =
+                                            (index - (survivingMoves.length - 1) / 2) * 30;
 
                                         return (
-                                            <g key={`enemy-${unit.unitType}-${unit.owner}`}>
+                                            <g key={`survivor-${m.id}`}>
                                                 <image
-                                                    href={getUnitIcon(unit.unitType)}
-                                                    x={defenderX - 15}
-                                                    y={centerY + yOffset - 17}
+                                                    href={getUnitIcon(m.unitType)}
+                                                    x={baseX - 15 + offset}
+                                                    y={baseY - 15}
                                                     width={30}
                                                     height={30}
                                                 />
+
                                                 <text
-                                                    x={defenderX}
-                                                    y={centerY + yOffset + 22}
+                                                    x={baseX + offset}
+                                                    y={baseY + 20}
                                                     fontSize="12"
                                                     textAnchor="middle"
-                                                    fill="red"
+                                                    fill={isPlayer(m.owner) ? "green" : "red"}
                                                     fontWeight="bold"
                                                 >
-                                                    {unit.amount}
+                                                    {m.amount}
                                                 </text>
                                             </g>
                                         );
