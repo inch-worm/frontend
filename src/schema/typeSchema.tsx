@@ -32,8 +32,28 @@ export const playerBattlePathInfoDtoSchema = {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "unitType": {
-                                    "type": "string"
+                                "unitTypeDto": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {
+                                            "type": "string"
+                                        },
+                                        "hp": {
+                                            "type": "integer"
+                                        },
+                                        "attack": {
+                                            "type": "integer"
+                                        },
+                                        "orderInFight": {
+                                            "type": "integer"
+                                        }
+                                    },
+                                    "required": [
+                                        "name",
+                                        "hp",
+                                        "attack",
+                                        "orderInFight"
+                                    ]
                                 },
                                 "count": {
                                     "type": "integer"
@@ -43,7 +63,7 @@ export const playerBattlePathInfoDtoSchema = {
                                 }
                             },
                             "required": [
-                                "unitType",
+                                "unitTypeDto",
                                 "count",
                                 "owner"
                             ]
@@ -80,5 +100,4 @@ export const playerBattlePathInfoDtoSchema = {
         "nodeDtos",
         "edgeDtos"
     ]
-
 } as const;

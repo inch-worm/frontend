@@ -9,14 +9,14 @@ type AnimatedMove = {
     to: { x: number; y: number };
     progress: number;
     durationMs: number;
-    unitType: string;
+    unitTypeName: string;
     owner: string;
     amount: number;
     fromAmount: number;
     fromNodeId: string;
     toNodeId: string;
     fightOpponents?: {
-        unitType: string;
+        unitTypeName: string;
         owner: string;
         amount: number;
     }[];
@@ -55,7 +55,7 @@ const getGroupCount = (
     owner: string
 ) =>
     node?.groupInfoDtos?.find(
-        group => group.unitType === unitType && group.owner === owner
+        group => group.unitTypeDto.name === unitType && group.owner === owner
     )?.count ?? 0;
 
 export function PlayerBattleComponent() {
@@ -127,7 +127,7 @@ export function PlayerBattleComponent() {
                 sourceNode.groupInfoDtos?.forEach(unit => {
                     const newSourceCount = getGroupCount(
                         newNodesById.get(sourceNode.id),
-                        unit.unitType,
+                        unit.unitTypeDto.name,
                         unit.owner
                     );
                     const movedAmount = unit.count - newSourceCount;
@@ -156,12 +156,12 @@ export function PlayerBattleComponent() {
                     const hasFight = Boolean(fightOpponents?.length);
                     const oldDestinationCount = getGroupCount(
                         oldDestinationNode,
-                        unit.unitType,
+                        unit.unitTypeDto.name,
                         unit.owner
                     );
                     const newDestinationCount = getGroupCount(
                         newNodesById.get(destinationNodeId),
-                        unit.unitType,
+                        unit.unitTypeDto.name,
                         unit.owner
                     );
                     const animatedAmount = hasFight
@@ -183,7 +183,7 @@ export function PlayerBattleComponent() {
                             ? FIGHT_ANIMATION_DURATION_MS +
                             (animatedAmount > 0 ? POST_FIGHT_MOVE_ANIMATION_DURATION_MS : 0)
                             : MOVE_ANIMATION_DURATION_MS,
-                        unitType: unit.unitType,
+                        unitTypeName: unit.unitTypeDto.name,
                         owner: unit.owner,
                         amount: animatedAmount,
                         fromAmount: movedAmount,
@@ -191,7 +191,7 @@ export function PlayerBattleComponent() {
                         toNodeId: destinationNode.id,
                         fightOpponents: hasFight
                             ? fightOpponents?.map(group => ({
-                                unitType: group.unitType,
+                                unitTypeName: group.unitTypeDto.name,
                                 owner: group.owner,
                                 amount: group.count
                             }))
@@ -272,7 +272,7 @@ export function PlayerBattleComponent() {
             if (m.fromNodeId === node.id) {
                 const u = units.find(
                     (x: any) =>
-                        x.unitType === m.unitType && x.owner === m.owner
+                        x.unitTypeDto.name === m.unitTypeName && x.owner === m.owner
                 );
 
                 if (u) {
@@ -282,7 +282,7 @@ export function PlayerBattleComponent() {
 
             if (m.toNodeId === node.id) {
                 m.fightOpponents?.forEach(defender => {
-                    const key = `${defender.unitType}-${defender.owner}`;
+                    const key = `${defender.unitTypeName}-${defender.owner}`;
                     hiddenFightDefenders.set(
                         key,
                         Math.max(hiddenFightDefenders.get(key) ?? 0, defender.amount)
@@ -292,10 +292,10 @@ export function PlayerBattleComponent() {
         });
 
         hiddenFightDefenders.forEach((amount, key) => {
-            const [unitType, owner] = key.split("-");
+            const [unitTypeName, owner] = key.split("-");
             const defender = units.find(
                 (unit: GroupInfoDto) =>
-                    unit.unitType === unitType && unit.owner === owner
+                    unit.unitTypeDto.name === unitTypeName && unit.owner === owner
             );
 
             if (defender) {
@@ -322,7 +322,7 @@ export function PlayerBattleComponent() {
             return (
                 <g key={i}>
                     <image
-                        href={getUnitIcon(unit.unitType)}
+                        href={getUnitIcon(unit.unitTypeDto.name)}
                         x={ux}
                         y={uy}
                         width={IMAGE_SIZE}
@@ -432,16 +432,16 @@ export function PlayerBattleComponent() {
 
                         if (hasFight) {
                             const participantsBySide = {
-                                player: new Map<string, { unitType: string; owner: string; amount: number }>(),
-                                enemy: new Map<string, { unitType: string; owner: string; amount: number }>()
+                                player: new Map<string, { unitTypeName: string; owner: string; amount: number }>(),
+                                enemy: new Map<string, { unitTypeName: string; owner: string; amount: number }>()
                             };
                             const addParticipant = (participant: {
-                                unitType: string;
+                                unitTypeName: string;
                                 owner: string;
                                 amount: number;
                             }) => {
                                 const side = isPlayer(participant.owner) ? "player" : "enemy";
-                                const key = `${participant.unitType}-${participant.owner}`;
+                                const key = `${participant.unitTypeName}-${participant.owner}`;
                                 const current = participantsBySide[side].get(key);
 
                                 participantsBySide[side].set(key, {
@@ -452,7 +452,7 @@ export function PlayerBattleComponent() {
 
                             group.forEach(m => {
                                 addParticipant({
-                                    unitType: m.unitType,
+                                    unitTypeName: m.unitTypeName,
                                     owner: m.owner,
                                     amount: m.fromAmount
                                 });
@@ -505,9 +505,9 @@ export function PlayerBattleComponent() {
                                             (index - (enemyUnits.length - 1) / 2) * rowSpacing;
 
                                         return (
-                                            <g key={`enemy-${unit.unitType}-${unit.owner}`}>
+                                            <g key={`enemy-${unit.unitTypeName}-${unit.owner}`}>
                                                 <image
-                                                    href={getUnitIcon(unit.unitType)}
+                                                    href={getUnitIcon(unit.unitTypeName)}
                                                     x={centerX + xOffset - 15}
                                                     y={topY - 17}
                                                     width={30}
@@ -532,9 +532,9 @@ export function PlayerBattleComponent() {
                                             (index - (playerUnits.length - 1) / 2) * rowSpacing;
 
                                         return (
-                                            <g key={`player-${unit.unitType}-${unit.owner}`}>
+                                            <g key={`player-${unit.unitTypeName}-${unit.owner}`}>
                                                 <image
-                                                    href={getUnitIcon(unit.unitType)}
+                                                    href={getUnitIcon(unit.unitTypeName)}
                                                     x={centerX + xOffset - 15}
                                                     y={bottomY - 17}
                                                     width={30}
@@ -567,7 +567,7 @@ export function PlayerBattleComponent() {
                                         return (
                                             <g key={`survivor-${m.id}`}>
                                                 <image
-                                                    href={getUnitIcon(m.unitType)}
+                                                    href={getUnitIcon(m.unitTypeName)}
                                                     x={baseX - 15 + offset}
                                                     y={baseY - 15}
                                                     width={30}
@@ -604,7 +604,7 @@ export function PlayerBattleComponent() {
                             return (
                                 <g key={m.id}>
                                     <image
-                                        href={getUnitIcon(m.unitType)}
+                                        href={getUnitIcon(m.unitTypeName)}
                                         x={baseX - 15 + offset}
                                         y={baseY - 15}
                                         width={30}
