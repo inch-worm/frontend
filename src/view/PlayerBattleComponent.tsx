@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import PlayerBattleService from "../api/PlayerBattleService";
-import { PlayerBattlePathInfoDto } from "../type/type";
+import { PlayerBattleInfoDto, PlayerBattlePathInfoDto } from "../type/type";
 
 type AnimatedMove = {
     id: string;
@@ -27,6 +27,16 @@ type GroupInfoDto = NonNullable<
 >[number];
 type NodeDto = PlayerBattlePathInfoDto["nodeDtos"][number];
 type EdgeDto = PlayerBattlePathInfoDto["edgeDtos"][number];
+
+const getPathDtos = (
+    battleInfo: PlayerBattleInfoDto | PlayerBattlePathInfoDto[] | undefined
+) => {
+    if (Array.isArray(battleInfo)) {
+        return battleInfo;
+    }
+
+    return battleInfo?.pathDtos ?? [];
+};
 
 const isEnemy = (owner: string) => owner.toUpperCase() === "ENEMY";
 const isPlayer = (owner: string) => owner.toUpperCase() === "PLAYER";
@@ -80,7 +90,7 @@ export function PlayerBattleComponent() {
 
     useEffect(() => {
         PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "")
-            .then((res: any) => setData(Array.isArray(res.data) ? res.data : []))
+            .then(res => setData(getPathDtos(res.data)))
             .catch(console.error);
     }, [playerId]);
 
@@ -90,8 +100,8 @@ export function PlayerBattleComponent() {
         }
 
         PlayerBattleService.playerBattlePathNextTurn(playerId ?? "")
-            .then((res: any) => {
-                const newData = Array.isArray(res.data) ? res.data : [];
+            .then(res => {
+                const newData = getPathDtos(res.data);
                 const moves = generateMovements(data, newData);
 
                 if (moves.length === 0) {
@@ -169,7 +179,7 @@ export function PlayerBattleComponent() {
                         : movedAmount;
 
                     moves.push({
-                        id: `${pathIndex}-${sourceNode.id}-${destinationNode.id}-${unit.unitType}-${unit.owner}-${moves.length}`,
+                        id: `${pathIndex}-${sourceNode.id}-${destinationNode.id}-${unit.unitTypeDto.name}-${unit.owner}-${moves.length}`,
                         from: {
                             x: sourceNode.xCoordinate,
                             y: sourceNode.yCoordinate

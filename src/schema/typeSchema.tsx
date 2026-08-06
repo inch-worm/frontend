@@ -10,6 +10,46 @@ export const playerResourceDtoSchema = {
     "required": ["resourceName", "amount", "playerName"]
 } as const;
 
+const groupInfoDtoSchema = {
+    "type": "object",
+    "properties": {
+        "unitTypeDto": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "hp": {
+                    "type": "integer"
+                },
+                "attack": {
+                    "type": "integer"
+                },
+                "orderInFight": {
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "name",
+                "hp",
+                "attack",
+                "orderInFight"
+            ]
+        },
+        "count": {
+            "type": "integer"
+        },
+        "owner": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "unitTypeDto",
+        "count",
+        "owner"
+    ]
+} as const;
+
 export const playerBattlePathInfoDtoSchema = {
     "type": "object",
     "properties": {
@@ -29,45 +69,7 @@ export const playerBattlePathInfoDtoSchema = {
                     },
                     "groupInfoDtos": {
                         "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "unitTypeDto": {
-                                    "type": "object",
-                                    "properties": {
-                                        "name": {
-                                            "type": "string"
-                                        },
-                                        "hp": {
-                                            "type": "integer"
-                                        },
-                                        "attack": {
-                                            "type": "integer"
-                                        },
-                                        "orderInFight": {
-                                            "type": "integer"
-                                        }
-                                    },
-                                    "required": [
-                                        "name",
-                                        "hp",
-                                        "attack",
-                                        "orderInFight"
-                                    ]
-                                },
-                                "count": {
-                                    "type": "integer"
-                                },
-                                "owner": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "unitTypeDto",
-                                "count",
-                                "owner"
-                            ]
-                        }
+                        "items": groupInfoDtoSchema
                     }
                 },
                 "required": [
@@ -99,5 +101,35 @@ export const playerBattlePathInfoDtoSchema = {
     "required": [
         "nodeDtos",
         "edgeDtos"
+    ]
+} as const;
+
+export const playerBattleInfoDtoSchema = {
+    "type": "object",
+    "properties": {
+        "pathDtos": {
+            "type": "array",
+            "items": playerBattlePathInfoDtoSchema
+        },
+        "unplacedGroupDtos": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "groupInfoDto": groupInfoDtoSchema,
+                    "count": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "groupInfoDto",
+                    "count"
+                ]
+            }
+        }
+    },
+    "required": [
+        "pathDtos",
+        "unplacedGroupDtos"
     ]
 } as const;
