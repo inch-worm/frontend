@@ -13,6 +13,9 @@ export const playerResourceDtoSchema = {
 const groupInfoDtoSchema = {
     "type": "object",
     "properties": {
+        "id": {
+            "type": "string"
+        },
         "unitTypeDto": {
             "type": "object",
             "properties": {
@@ -44,6 +47,7 @@ const groupInfoDtoSchema = {
         }
     },
     "required": [
+        "id",
         "unitTypeDto",
         "count",
         "owner"

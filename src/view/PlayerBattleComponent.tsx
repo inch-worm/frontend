@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import PlayerBattleService from "../api/PlayerBattleService";
+import PlayerBattleService, { PlayerBattleNextTurnRequest } from "../api/PlayerBattleService";
 import { PlayerBattleInfoDto, PlayerBattlePathInfoDto } from "../type/type";
 
 type AnimatedMove = {
@@ -25,6 +25,7 @@ type AnimatedMove = {
 type GroupInfoDto = NonNullable<
     PlayerBattlePathInfoDto["nodeDtos"][number]["groupInfoDtos"]
 >[number];
+type UnplacedGroupDto = PlayerBattleInfoDto["unplacedGroupDtos"][number];
 type NodeDto = PlayerBattlePathInfoDto["nodeDtos"][number];
 type EdgeDto = PlayerBattlePathInfoDto["edgeDtos"][number];
 
@@ -36,6 +37,16 @@ const getPathDtos = (
     }
 
     return battleInfo?.pathDtos ?? [];
+};
+
+const getUnplacedGroupDtos = (
+    battleInfo: PlayerBattleInfoDto | PlayerBattlePathInfoDto[] | undefined
+) => {
+    if (Array.isArray(battleInfo)) {
+        return [];
+    }
+
+    return battleInfo?.unplacedGroupDtos ?? [];
 };
 
 const isEnemy = (owner: string) => owner.toUpperCase() === "ENEMY";
@@ -72,6 +83,11 @@ export function PlayerBattleComponent() {
     const { playerId } = useParams<"playerId">();
 
     const [data, setData] = useState<PlayerBattlePathInfoDto[]>([]);
+    const [unplacedGroups, setUnplacedGroups] = useState<UnplacedGroupDto[]>([]);
+    const [unitPlacements, setUnitPlacements] = useState<
+        PlayerBattleNextTurnRequest["unitPlacementDtos"]
+    >([]);
+    const [selectedUnplacedGroupIndex, setSelectedUnplacedGroupIndex] = useState<number | null>(null);
     const [prevData, setPrevData] = useState<PlayerBattlePathInfoDto[]>([]);
     const [movingUnits, setMovingUnits] = useState<AnimatedMove[]>([]);
     const [pendingData, setPendingData] = useState<PlayerBattlePathInfoDto[] | null>(null);
@@ -90,7 +106,12 @@ export function PlayerBattleComponent() {
 
     useEffect(() => {
         PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "")
-            .then(res => setData(getPathDtos(res.data)))
+            .then(res => {
+                setData(getPathDtos(res.data));
+                setUnplacedGroups(getUnplacedGroupDtos(res.data));
+                setUnitPlacements([]);
+                setSelectedUnplacedGroupIndex(null);
+            })
             .catch(console.error);
     }, [playerId]);
 
@@ -99,10 +120,15 @@ export function PlayerBattleComponent() {
             return;
         }
 
-        PlayerBattleService.playerBattlePathNextTurn(playerId ?? "")
+        PlayerBattleService.playerBattlePathNextTurn(playerId ?? "", {
+            unitPlacementDtos: unitPlacements
+        })
             .then(res => {
                 const newData = getPathDtos(res.data);
                 const moves = generateMovements(data, newData);
+                setUnplacedGroups(getUnplacedGroupDtos(res.data));
+                setUnitPlacements([]);
+                setSelectedUnplacedGroupIndex(null);
 
                 if (moves.length === 0) {
                     setData(newData);
@@ -212,6 +238,84 @@ export function PlayerBattleComponent() {
         });
 
         return moves;
+    };
+
+    const isBottomNode = (path: PlayerBattlePathInfoDto, node: NodeDto) => {
+        const maxYCoordinate = Math.max(
+            ...(path.nodeDtos ?? []).map(pathNode => pathNode.yCoordinate)
+        );
+
+        return node.yCoordinate === maxYCoordinate;
+    };
+
+    const handlePlaceUnplacedGroup = (pathIndex: number, nodeId: string) => {
+        if (
+            selectedUnplacedGroupIndex === null ||
+            movingUnits.length > 0 ||
+            pendingData !== null
+        ) {
+            return;
+        }
+
+        const selectedUnplacedGroup = unplacedGroups[selectedUnplacedGroupIndex];
+        if (!selectedUnplacedGroup) {
+            return;
+        }
+
+        setUnitPlacements(currentPlacements => [
+            ...currentPlacements,
+            {
+                unplacedGroupInfoId: selectedUnplacedGroup.groupInfoDto.id,
+                nodeId
+            }
+        ]);
+        setData(currentData =>
+            currentData.map((path, currentPathIndex) => {
+                if (currentPathIndex !== pathIndex) {
+                    return path;
+                }
+
+                return {
+                    ...path,
+                    nodeDtos: (path.nodeDtos ?? []).map(node => {
+                        if (node.id !== nodeId) {
+                            return node;
+                        }
+
+                        const placedGroup: GroupInfoDto = {
+                            ...selectedUnplacedGroup.groupInfoDto,
+                            count: selectedUnplacedGroup.count
+                        };
+                        const groupInfoDtos = [...(node.groupInfoDtos ?? [])];
+                        const existingGroup = groupInfoDtos.find(
+                            group =>
+                                group.unitTypeDto.name === placedGroup.unitTypeDto.name &&
+                                group.owner === placedGroup.owner
+                        );
+
+                        if (existingGroup) {
+                            return {
+                                ...node,
+                                groupInfoDtos: groupInfoDtos.map(group =>
+                                    group === existingGroup
+                                        ? { ...group, count: group.count + placedGroup.count }
+                                        : group
+                                )
+                            };
+                        }
+
+                        return {
+                            ...node,
+                            groupInfoDtos: [...groupInfoDtos, placedGroup]
+                        };
+                    })
+                };
+            })
+        );
+        setUnplacedGroups(currentGroups =>
+            currentGroups.filter((_, index) => index !== selectedUnplacedGroupIndex)
+        );
+        setSelectedUnplacedGroupIndex(null);
     };
 
     const activeAnimationDurationMs = movingUnits.reduce(
@@ -354,6 +458,21 @@ export function PlayerBattleComponent() {
 
     const renderData = movingUnits.length > 0 ? prevData : data;
     const pathsToRender = Array.isArray(renderData) ? renderData : [];
+    const svgHeight =
+        pathsToRender.length === 0
+            ? 240
+            : Math.max(
+                240,
+                ...pathsToRender.flatMap(path =>
+                    (path.nodeDtos ?? []).map(
+                        node => node.yCoordinate * SCALE + TOP_OFFSET + NODE_SIZE
+                    )
+                )
+            );
+    const canPlaceUnplacedGroup =
+        selectedUnplacedGroupIndex !== null &&
+        movingUnits.length === 0 &&
+        pendingData === null;
 
     return (
         <div style={{ textAlign: "center", paddingTop: "20px" }}>
@@ -369,7 +488,7 @@ export function PlayerBattleComponent() {
                 Next Turn
             </button>
 
-            <svg width={1600} height={1600} style={{ border: "1px solid #ccc" }}>
+            <svg width={1600} height={svgHeight} style={{ border: "1px solid #ccc" }}>
                 {pathsToRender.map((path, pathIndex) => (
                     <g key={pathIndex}>
                         {(path.edgeDtos ?? []).map((edge, i) => {
@@ -393,18 +512,34 @@ export function PlayerBattleComponent() {
                         {(path.nodeDtos ?? []).map(node => {
                             const x = node.xCoordinate * SCALE;
                             const y = node.yCoordinate * SCALE + TOP_OFFSET;
+                            const canPlaceOnNode = canPlaceUnplacedGroup && isBottomNode(path, node);
 
                             return (
-                                <g key={node.id}>
+                                <g
+                                    key={node.id}
+                                    onClick={() => {
+                                        if (canPlaceOnNode) {
+                                            handlePlaceUnplacedGroup(pathIndex, node.id);
+                                        }
+                                    }}
+                                    style={{
+                                        cursor: canPlaceOnNode ? "pointer" : "default"
+                                    }}
+                                >
                                     <rect
                                         x={x - NODE_SIZE / 2}
                                         y={y - NODE_SIZE / 2}
                                         width={NODE_SIZE}
                                         height={NODE_SIZE}
                                         rx={12}
-                                        fill="#f5f5f5"
-                                        stroke="#222"
-                                    />
+                                        fill={canPlaceOnNode ? "#e8f7ea" : "#f5f5f5"}
+                                        stroke={canPlaceOnNode ? "#198754" : "#222"}
+                                        strokeWidth={canPlaceOnNode ? 3 : 1}
+                                    >
+                                        {canPlaceOnNode && (
+                                            <title>Place selected group here</title>
+                                        )}
+                                    </rect>
 
                                     {renderUnits(node, x, y)}
 
@@ -637,6 +772,64 @@ export function PlayerBattleComponent() {
                     });
                 })()}
             </svg>
+
+            <div
+                style={{
+                    margin: "20px auto 0",
+                    width: "min(1600px, 100%)",
+                    textAlign: "left"
+                }}
+            >
+                <h3 style={{ margin: "0 0 12px" }}>Unplaced groups</h3>
+
+                {unplacedGroups.length === 0 ? (
+                    <div style={{ color: "#666" }}>No unplaced groups</div>
+                ) : (
+                    <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                        {unplacedGroups.map((unplacedGroup, index) => {
+                            const isSelected = selectedUnplacedGroupIndex === index;
+                            const group = unplacedGroup.groupInfoDto;
+
+                            return (
+                                <button
+                                    key={`${group.unitTypeDto.name}-${group.owner}-${index}`}
+                                    type="button"
+                                    onClick={() =>
+                                        setSelectedUnplacedGroupIndex(isSelected ? null : index)
+                                    }
+                                    disabled={movingUnits.length > 0 || pendingData !== null}
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "8px",
+                                        padding: "8px 10px",
+                                        borderRadius: "6px",
+                                        border: isSelected
+                                            ? "2px solid #198754"
+                                            : "1px solid #bbb",
+                                        background: isSelected ? "#e8f7ea" : "#fff",
+                                        cursor:
+                                            movingUnits.length > 0 || pendingData !== null
+                                                ? "not-allowed"
+                                                : "pointer"
+                                    }}
+                                >
+                                    <img
+                                        src={getUnitIcon(group.unitTypeDto.name)}
+                                        alt={group.unitTypeDto.name}
+                                        width={28}
+                                        height={28}
+                                        style={{ objectFit: "cover" }}
+                                    />
+                                    <span>
+                                        {group.unitTypeDto.name} x{unplacedGroup.count}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
