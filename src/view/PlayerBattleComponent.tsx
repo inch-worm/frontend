@@ -51,8 +51,6 @@ const getUnplacedGroupDtos = (
 
 const isEnemy = (owner: string) => owner.toUpperCase() === "ENEMY";
 const isPlayer = (owner: string) => owner.toUpperCase() === "PLAYER";
-const areOpponents = (firstOwner: string, secondOwner: string) =>
-    firstOwner.toUpperCase() !== secondOwner.toUpperCase();
 
 const getDestinationNodeId = (
     owner: string,
@@ -249,16 +247,6 @@ export function PlayerBattleComponent() {
 
             oldPath.nodeDtos?.forEach(sourceNode => {
                 sourceNode.groupInfoDtos?.forEach(unit => {
-                    const newSourceCount = getGroupCount(
-                        newNodesById.get(sourceNode.id),
-                        unit.unitTypeDto.name,
-                        unit.owner
-                    );
-                    const movedAmount = unit.count - newSourceCount;
-                    if (movedAmount <= 0) {
-                        return;
-                    }
-
                     const destinationNodeId = getDestinationNodeId(
                         unit.owner,
                         sourceNode.id,
@@ -274,9 +262,11 @@ export function PlayerBattleComponent() {
                         return;
                     }
                     const oldDestinationNode = oldNodesById.get(destinationNodeId);
-                    const fightOpponents = oldDestinationNode?.groupInfoDtos?.filter(
-                        group => areOpponents(group.owner, unit.owner) && group.count > 0
-                    );
+                    const fightOpponents = isEnemy(unit.owner)
+                        ? oldDestinationNode?.groupInfoDtos?.filter(
+                            group => isPlayer(group.owner) && group.count > 0
+                        )
+                        : undefined;
                     const hasFight = Boolean(fightOpponents?.length);
                     const oldDestinationCount = getGroupCount(
                         oldDestinationNode,
@@ -288,9 +278,19 @@ export function PlayerBattleComponent() {
                         unit.unitTypeDto.name,
                         unit.owner
                     );
-                    const animatedAmount = hasFight
-                        ? Math.max(newDestinationCount - oldDestinationCount, 0)
-                        : movedAmount;
+                    // A smaller source group can mean combat losses, not movement. The
+                    // destination increase is the authoritative indication that a group moved.
+                    const movedAmount = Math.max(
+                        newDestinationCount - oldDestinationCount,
+                        0
+                    );
+
+                    // Combat is resolved before movement by the backend. Therefore an enemy
+                    // group next to a player group must still be animated as a fight even when
+                    // it does not survive (and consequently never changes nodes).
+                    if (!hasFight && movedAmount === 0) {
+                        return;
+                    }
 
                     moves.push({
                         id: `${pathIndex}-${sourceNode.id}-${destinationNode.id}-${unit.unitTypeDto.name}-${unit.owner}-${moves.length}`,
@@ -305,12 +305,12 @@ export function PlayerBattleComponent() {
                         progress: 0,
                         durationMs: hasFight
                             ? FIGHT_ANIMATION_DURATION_MS +
-                            (animatedAmount > 0 ? POST_FIGHT_MOVE_ANIMATION_DURATION_MS : 0)
+                            (movedAmount > 0 ? POST_FIGHT_MOVE_ANIMATION_DURATION_MS : 0)
                             : MOVE_ANIMATION_DURATION_MS,
                         unitTypeName: unit.unitTypeDto.name,
                         owner: unit.owner,
-                        amount: animatedAmount,
-                        fromAmount: movedAmount,
+                        amount: movedAmount,
+                        fromAmount: hasFight ? unit.count : movedAmount,
                         fromNodeId: sourceNode.id,
                         toNodeId: destinationNode.id,
                         fightOpponents: hasFight
@@ -416,7 +416,15 @@ export function PlayerBattleComponent() {
                         ...m,
                         progress: Math.min(elapsedMs / m.durationMs, 1)
                     }))
-                    .filter(m => m.progress < 1)
+                    // Keep completed non-combat moves on their destination while a
+                    // fight in the same turn is still playing. The board is rendered
+                    // from prevData until the whole animation batch completes.
+                    .filter(
+                        m =>
+                            m.progress < 1 ||
+                            (!m.fightOpponents?.length &&
+                                elapsedMs < activeAnimationDurationMs)
+                    )
             );
 
             if (elapsedMs < activeAnimationDurationMs) {
@@ -724,12 +732,6 @@ export function PlayerBattleComponent() {
 
                             const playerUnits = Array.from(participantsBySide.player.values());
                             const enemyUnits = Array.from(participantsBySide.enemy.values());
-                            const x1 = firstMove.from.x * SCALE;
-                            const y1 = firstMove.from.y * SCALE + TOP_OFFSET;
-                            const x2 = firstMove.to.x * SCALE;
-                            const y2 = firstMove.to.y * SCALE + TOP_OFFSET;
-                            const centerX = x1 + (x2 - x1) / 2;
-                            const centerY = y1 + (y2 - y1) / 2;
                             const groupDurationMs = Math.max(...group.map(m => m.durationMs));
                             const groupElapsedMs = Math.max(
                                 ...group.map(m => m.progress * m.durationMs)
@@ -746,6 +748,12 @@ export function PlayerBattleComponent() {
                                     1
                                 )
                             );
+                            const x1 = firstMove.from.x * SCALE;
+                            const y1 = firstMove.from.y * SCALE + TOP_OFFSET;
+                            const x2 = firstMove.to.x * SCALE;
+                            const y2 = firstMove.to.y * SCALE + TOP_OFFSET;
+                            const centerX = x1 + (x2 - x1) / 2;
+                            const centerY = y1 + (y2 - y1) / 2;
                             const contactProgress =
                                 fightProgress < 0.3
                                     ? fightProgress / 0.3
@@ -760,7 +768,6 @@ export function PlayerBattleComponent() {
                             const bottomY = centerY + 44 - safeContactProgress * 24;
                             const rowSpacing = 34;
                             const fightFinished = progress >= fightPhaseRatio;
-
                             return [
                                 <g key={`fight-${firstMove.id}`}>
                                     {!fightFinished && enemyUnits.map((unit, index) => {
@@ -836,7 +843,6 @@ export function PlayerBattleComponent() {
                                                     width={30}
                                                     height={30}
                                                 />
-
                                                 <text
                                                     x={baseX + offset}
                                                     y={baseY + 20}
@@ -850,6 +856,7 @@ export function PlayerBattleComponent() {
                                             </g>
                                         );
                                     })}
+
                                 </g>
                             ];
                         }
