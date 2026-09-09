@@ -91,6 +91,10 @@ export function PlayerBattleComponent() {
     const [prevData, setPrevData] = useState<PlayerBattlePathInfoDto[]>([]);
     const [movingUnits, setMovingUnits] = useState<AnimatedMove[]>([]);
     const [pendingData, setPendingData] = useState<PlayerBattlePathInfoDto[] | null>(null);
+    const [queuedTurnMoves, setQueuedTurnMoves] = useState<AnimatedMove[]>([]);
+    const [queuedTurnStartData, setQueuedTurnStartData] = useState<
+        PlayerBattlePathInfoDto[] | null
+    >(null);
     const [animationStartedAt, setAnimationStartedAt] = useState<number | null>(null);
 
     const NODE_SIZE = 80;
@@ -116,31 +120,115 @@ export function PlayerBattleComponent() {
     }, [playerId]);
 
     const handleNextTurn = () => {
-        if (movingUnits.length > 0 || pendingData) {
+        if (movingUnits.length > 0 || pendingData || queuedTurnMoves.length > 0) {
             return;
         }
 
+        const placementsForTurn = [...unitPlacements];
+        const placementStartData = addPlacedGroupsToData(data, placementsForTurn);
+
         PlayerBattleService.playerBattlePathNextTurn(playerId ?? "", {
-            unitPlacementDtos: unitPlacements
+            unitPlacementDtos: placementsForTurn
         })
             .then(res => {
                 const newData = getPathDtos(res.data);
-                const moves = generateMovements(data, newData);
+                const placementMoves = generatePlacementMovements(placementsForTurn);
+                const moves = generateMovements(placementStartData, newData);
                 setUnplacedGroups(getUnplacedGroupDtos(res.data));
                 setUnitPlacements([]);
                 setSelectedUnplacedGroupIndex(null);
 
-                if (moves.length === 0) {
+                if (placementMoves.length === 0 && moves.length === 0) {
                     setData(newData);
                     return;
                 }
 
                 setPrevData(data);
-                setMovingUnits(moves);
+                setMovingUnits(placementMoves.length > 0 ? placementMoves : moves);
+                setQueuedTurnMoves(placementMoves.length > 0 ? moves : []);
+                setQueuedTurnStartData(placementMoves.length > 0 ? placementStartData : null);
                 setPendingData(newData);
                 setAnimationStartedAt(null);
             })
             .catch(console.error);
+    };
+
+    const addPlacedGroupsToData = (
+        currentData: PlayerBattlePathInfoDto[],
+        placements: PlayerBattleNextTurnRequest["unitPlacementDtos"]
+    ) =>
+        currentData.map(path => ({
+            ...path,
+            nodeDtos: (path.nodeDtos ?? []).map(node => {
+                const placement = placements.find(item => item.nodeId === node.id);
+                const placedGroup = placement
+                    ? unplacedGroups.find(
+                        group => group.groupInfoDto.id === placement.unplacedGroupInfoId
+                    )
+                    : undefined;
+
+                if (!placedGroup) {
+                    return node;
+                }
+
+                const existingGroup = (node.groupInfoDtos ?? []).find(
+                    group =>
+                        group.unitTypeDto.name === placedGroup.groupInfoDto.unitTypeDto.name &&
+                        group.owner === placedGroup.groupInfoDto.owner
+                );
+
+                return {
+                    ...node,
+                    groupInfoDtos: existingGroup
+                        ? (node.groupInfoDtos ?? []).map(group =>
+                            group === existingGroup
+                                ? { ...group, count: group.count + placedGroup.count }
+                                : group
+                        )
+                        : [
+                            ...(node.groupInfoDtos ?? []),
+                            { ...placedGroup.groupInfoDto, count: placedGroup.count }
+                        ]
+                };
+            })
+        }));
+
+    const generatePlacementMovements = (
+        placements: PlayerBattleNextTurnRequest["unitPlacementDtos"]
+    ) => {
+        const moves: AnimatedMove[] = [];
+
+        data.forEach(path => {
+            path.nodeDtos?.forEach(node => {
+                const placement = placements.find(item => item.nodeId === node.id);
+                const group = placement
+                    ? unplacedGroups.find(
+                        unplaced =>
+                            unplaced.groupInfoDto.id === placement.unplacedGroupInfoId
+                    )
+                    : undefined;
+
+                if (!group) {
+                    return;
+                }
+
+                moves.push({
+                    id: `placement-${group.groupInfoDto.id}`,
+                    from: { x: node.xCoordinate, y: node.yCoordinate + 0.7 },
+                    to: { x: node.xCoordinate, y: node.yCoordinate },
+                    progress: 0,
+                    durationMs: MOVE_ANIMATION_DURATION_MS,
+                    unitTypeName: group.groupInfoDto.unitTypeDto.name,
+                    owner: group.groupInfoDto.owner,
+                    amount: group.count,
+                    fromAmount: group.count,
+                    fromNodeId: `placement-${node.id}`,
+                    toNodeId: node.id
+                });
+            });
+        });
+
+        return moves;
     };
 
     // DETECT MOVEMENTS
@@ -262,60 +350,31 @@ export function PlayerBattleComponent() {
             return;
         }
 
-        setUnitPlacements(currentPlacements => [
-            ...currentPlacements,
-            {
-                unplacedGroupInfoId: selectedUnplacedGroup.groupInfoDto.id,
-                nodeId
+        setUnitPlacements(currentPlacements => {
+            if (
+                currentPlacements.some(
+                    placement =>
+                        placement.unplacedGroupInfoId === selectedUnplacedGroup.groupInfoDto.id
+                )
+            ) {
+                return currentPlacements;
             }
-        ]);
-        setData(currentData =>
-            currentData.map((path, currentPathIndex) => {
-                if (currentPathIndex !== pathIndex) {
-                    return path;
+
+            return [
+                ...currentPlacements,
+                {
+                    unplacedGroupInfoId: selectedUnplacedGroup.groupInfoDto.id,
+                    nodeId
                 }
-
-                return {
-                    ...path,
-                    nodeDtos: (path.nodeDtos ?? []).map(node => {
-                        if (node.id !== nodeId) {
-                            return node;
-                        }
-
-                        const placedGroup: GroupInfoDto = {
-                            ...selectedUnplacedGroup.groupInfoDto,
-                            count: selectedUnplacedGroup.count
-                        };
-                        const groupInfoDtos = [...(node.groupInfoDtos ?? [])];
-                        const existingGroup = groupInfoDtos.find(
-                            group =>
-                                group.unitTypeDto.name === placedGroup.unitTypeDto.name &&
-                                group.owner === placedGroup.owner
-                        );
-
-                        if (existingGroup) {
-                            return {
-                                ...node,
-                                groupInfoDtos: groupInfoDtos.map(group =>
-                                    group === existingGroup
-                                        ? { ...group, count: group.count + placedGroup.count }
-                                        : group
-                                )
-                            };
-                        }
-
-                        return {
-                            ...node,
-                            groupInfoDtos: [...groupInfoDtos, placedGroup]
-                        };
-                    })
-                };
-            })
-        );
-        setUnplacedGroups(currentGroups =>
-            currentGroups.filter((_, index) => index !== selectedUnplacedGroupIndex)
-        );
+            ];
+        });
         setSelectedUnplacedGroupIndex(null);
+    };
+
+    const cancelPlacementOnNode = (nodeId: string) => {
+        setUnitPlacements(currentPlacements =>
+            currentPlacements.filter(placement => placement.nodeId !== nodeId)
+        );
     };
 
     const activeAnimationDurationMs = movingUnits.reduce(
@@ -325,6 +384,15 @@ export function PlayerBattleComponent() {
 
     useEffect(() => {
         if (movingUnits.length === 0) {
+            if (queuedTurnMoves.length > 0) {
+                setPrevData(queuedTurnStartData ?? data);
+                setMovingUnits(queuedTurnMoves);
+                setQueuedTurnMoves([]);
+                setQueuedTurnStartData(null);
+                setAnimationStartedAt(null);
+                return;
+            }
+
             if (pendingData) {
                 setData(pendingData);
                 setPendingData(null);
@@ -359,7 +427,15 @@ export function PlayerBattleComponent() {
         animationFrameId = requestAnimationFrame(tick);
 
         return () => cancelAnimationFrame(animationFrameId);
-    }, [activeAnimationDurationMs, animationStartedAt, movingUnits.length, pendingData]);
+    }, [
+        activeAnimationDurationMs,
+        animationStartedAt,
+        movingUnits.length,
+        pendingData,
+        queuedTurnMoves,
+        queuedTurnStartData,
+        data
+    ]);
 
     // ICONS
     const getUnitIcon = (type: string) => {
@@ -465,7 +541,7 @@ export function PlayerBattleComponent() {
                 240,
                 ...pathsToRender.flatMap(path =>
                     (path.nodeDtos ?? []).map(
-                        node => node.yCoordinate * SCALE + TOP_OFFSET + NODE_SIZE
+                        node => node.yCoordinate * SCALE + TOP_OFFSET + NODE_SIZE + 50
                     )
                 )
             );
@@ -513,17 +589,32 @@ export function PlayerBattleComponent() {
                             const x = node.xCoordinate * SCALE;
                             const y = node.yCoordinate * SCALE + TOP_OFFSET;
                             const canPlaceOnNode = canPlaceUnplacedGroup && isBottomNode(path, node);
+                            const placementOnNode = unitPlacements.find(
+                                placement => placement.nodeId === node.id
+                            );
+                            const placedGroup = placementOnNode
+                                ? unplacedGroups.find(
+                                    group =>
+                                        group.groupInfoDto.id ===
+                                        placementOnNode.unplacedGroupInfoId
+                                )
+                                : undefined;
 
                             return (
                                 <g
                                     key={node.id}
                                     onClick={() => {
-                                        if (canPlaceOnNode) {
+                                        if (placementOnNode) {
+                                            cancelPlacementOnNode(node.id);
+                                        } else if (canPlaceOnNode) {
                                             handlePlaceUnplacedGroup(pathIndex, node.id);
                                         }
                                     }}
                                     style={{
-                                        cursor: canPlaceOnNode ? "pointer" : "default"
+                                        cursor:
+                                            canPlaceOnNode || placementOnNode
+                                                ? "pointer"
+                                                : "default"
                                     }}
                                 >
                                     <rect
@@ -542,6 +633,33 @@ export function PlayerBattleComponent() {
                                     </rect>
 
                                     {renderUnits(node, x, y)}
+
+                                    {placedGroup && (
+                                        <g>
+                                            <image
+                                                href={getUnitIcon(
+                                                    placedGroup.groupInfoDto.unitTypeDto.name
+                                                )}
+                                                x={x - IMAGE_SIZE / 2}
+                                                y={y + NODE_SIZE / 2 + 18}
+                                                width={IMAGE_SIZE}
+                                                height={IMAGE_SIZE}
+                                            />
+                                            <text
+                                                x={x}
+                                                y={y + NODE_SIZE / 2 + 52}
+                                                fontSize="11"
+                                                textAnchor="middle"
+                                                fill={
+                                                    isPlayer(placedGroup.groupInfoDto.owner)
+                                                        ? "green"
+                                                        : "red"
+                                                }
+                                            >
+                                                {placedGroup.count}
+                                            </text>
+                                        </g>
+                                    )}
 
                                     <text
                                         x={x}
@@ -787,6 +905,16 @@ export function PlayerBattleComponent() {
                 ) : (
                     <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
                         {unplacedGroups.map((unplacedGroup, index) => {
+                            if (
+                                unitPlacements.some(
+                                    placement =>
+                                        placement.unplacedGroupInfoId ===
+                                        unplacedGroup.groupInfoDto.id
+                                )
+                            ) {
+                                return null;
+                            }
+
                             const isSelected = selectedUnplacedGroupIndex === index;
                             const group = unplacedGroup.groupInfoDto;
 
