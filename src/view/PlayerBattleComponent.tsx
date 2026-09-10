@@ -22,6 +22,11 @@ type AnimatedMove = {
     }[];
 };
 
+type AnimationPhase = {
+    moves: AnimatedMove[];
+    renderData: PlayerBattlePathInfoDto[];
+};
+
 type GroupInfoDto = NonNullable<
     PlayerBattlePathInfoDto["nodeDtos"][number]["groupInfoDtos"]
 >[number];
@@ -89,10 +94,7 @@ export function PlayerBattleComponent() {
     const [prevData, setPrevData] = useState<PlayerBattlePathInfoDto[]>([]);
     const [movingUnits, setMovingUnits] = useState<AnimatedMove[]>([]);
     const [pendingData, setPendingData] = useState<PlayerBattlePathInfoDto[] | null>(null);
-    const [queuedTurnMoves, setQueuedTurnMoves] = useState<AnimatedMove[]>([]);
-    const [queuedTurnStartData, setQueuedTurnStartData] = useState<
-        PlayerBattlePathInfoDto[] | null
-    >(null);
+    const [queuedTurnMovePhases, setQueuedTurnMovePhases] = useState<AnimationPhase[]>([]);
     const [animationStartedAt, setAnimationStartedAt] = useState<number | null>(null);
 
     const NODE_SIZE = 80;
@@ -117,8 +119,58 @@ export function PlayerBattleComponent() {
             .catch(console.error);
     }, [playerId]);
 
+    const getDataBeforeMovements = (
+        resolvedData: PlayerBattlePathInfoDto[],
+        moves: AnimatedMove[]
+    ) => {
+        const dataBeforeMovements = resolvedData.map(path => ({
+            ...path,
+            nodeDtos: (path.nodeDtos ?? []).map(node => ({
+                ...node,
+                groupInfoDtos: (node.groupInfoDtos ?? []).map(group => ({ ...group }))
+            }))
+        }));
+        const nodesById = new Map<string, NodeDto>(
+            dataBeforeMovements.flatMap(path =>
+                (path.nodeDtos ?? []).map(node => [node.id, node] as [string, NodeDto])
+            )
+        );
+
+        moves.forEach(move => {
+            const fromNode = nodesById.get(move.fromNodeId);
+            const toNode = nodesById.get(move.toNodeId);
+            const arrivingGroup = toNode?.groupInfoDtos?.find(
+                group =>
+                    group.unitTypeDto.name === move.unitTypeName && group.owner === move.owner
+            );
+
+            if (!fromNode || !toNode || !arrivingGroup) {
+                return;
+            }
+
+            arrivingGroup.count -= move.amount;
+            const sourceGroup = fromNode.groupInfoDtos?.find(
+                group =>
+                    group.unitTypeDto.name === move.unitTypeName && group.owner === move.owner
+            );
+
+            if (sourceGroup) {
+                sourceGroup.count += move.amount;
+            } else {
+                fromNode.groupInfoDtos = [
+                    ...(fromNode.groupInfoDtos ?? []),
+                    { ...arrivingGroup, count: move.amount }
+                ];
+            }
+
+            toNode.groupInfoDtos = (toNode.groupInfoDtos ?? []).filter(group => group.count > 0);
+        });
+
+        return dataBeforeMovements;
+    };
+
     const handleNextTurn = () => {
-        if (movingUnits.length > 0 || pendingData || queuedTurnMoves.length > 0) {
+        if (movingUnits.length > 0 || pendingData || queuedTurnMovePhases.length > 0) {
             return;
         }
 
@@ -132,19 +184,38 @@ export function PlayerBattleComponent() {
                 const newData = getPathDtos(res.data);
                 const placementMoves = generatePlacementMovements(placementsForTurn);
                 const moves = generateMovements(placementStartData, newData);
+                const fightMoves = moves.filter(move => move.fightOpponents?.length);
+                const movementMoves = moves.filter(move => !move.fightOpponents?.length);
+                const turnStartData = placementMoves.length > 0 ? placementStartData : data;
+                const animationPhases: AnimationPhase[] = [
+                    ...(placementMoves.length > 0
+                        ? [{ moves: placementMoves, renderData: data }]
+                        : []),
+                    ...(fightMoves.length > 0
+                        ? [{ moves: fightMoves, renderData: turnStartData }]
+                        : []),
+                    ...(movementMoves.length > 0
+                        ? [{
+                            moves: movementMoves,
+                            renderData:
+                                fightMoves.length > 0
+                                    ? getDataBeforeMovements(newData, movementMoves)
+                                    : turnStartData
+                        }]
+                        : [])
+                ];
                 setUnplacedGroups(getUnplacedGroupDtos(res.data));
                 setUnitPlacements([]);
                 setSelectedUnplacedGroupIndex(null);
 
-                if (placementMoves.length === 0 && moves.length === 0) {
+                if (animationPhases.length === 0) {
                     setData(newData);
                     return;
                 }
 
-                setPrevData(data);
-                setMovingUnits(placementMoves.length > 0 ? placementMoves : moves);
-                setQueuedTurnMoves(placementMoves.length > 0 ? moves : []);
-                setQueuedTurnStartData(placementMoves.length > 0 ? placementStartData : null);
+                setPrevData(animationPhases[0].renderData);
+                setMovingUnits(animationPhases[0].moves);
+                setQueuedTurnMovePhases(animationPhases.slice(1));
                 setPendingData(newData);
                 setAnimationStartedAt(null);
             })
@@ -384,11 +455,10 @@ export function PlayerBattleComponent() {
 
     useEffect(() => {
         if (movingUnits.length === 0) {
-            if (queuedTurnMoves.length > 0) {
-                setPrevData(queuedTurnStartData ?? data);
-                setMovingUnits(queuedTurnMoves);
-                setQueuedTurnMoves([]);
-                setQueuedTurnStartData(null);
+            if (queuedTurnMovePhases.length > 0) {
+                setPrevData(queuedTurnMovePhases[0].renderData);
+                setMovingUnits(queuedTurnMovePhases[0].moves);
+                setQueuedTurnMovePhases(phases => phases.slice(1));
                 setAnimationStartedAt(null);
                 return;
             }
@@ -440,8 +510,7 @@ export function PlayerBattleComponent() {
         animationStartedAt,
         movingUnits.length,
         pendingData,
-        queuedTurnMoves,
-        queuedTurnStartData,
+        queuedTurnMovePhases,
         data
     ]);
 
@@ -566,7 +635,11 @@ export function PlayerBattleComponent() {
 
             <button
                 onClick={handleNextTurn}
-                disabled={movingUnits.length > 0 || pendingData !== null}
+                disabled={
+                    movingUnits.length > 0 ||
+                    pendingData !== null ||
+                    queuedTurnMovePhases.length > 0
+                }
                 style={{ marginBottom: "20px" }}
             >
                 Next Turn
