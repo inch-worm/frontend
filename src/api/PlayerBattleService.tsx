@@ -8,8 +8,8 @@ export type PlayerBattleNextTurnRequest = {
     }[];
 };
 
-const getPlayerBattlePathInfoDtos = async (playerId: any) => {
-    return http.get<PlayerBattleInfoDto>(`/playerBattlePathInfoDtos/${playerId}`);
+const getPlayerBattlePathInfoDto = async (playerId: any) => {
+    return http.get<PlayerBattleInfoDto>(`/currentPlayerBattlePathInfoDto/${playerId}`);
 };
 
 const playerBattlePathNextTurn = async (
@@ -24,7 +24,7 @@ const playerBattlePathNextTurn = async (
 
 
 const PlayerBattleService = {
-    getPlayerBattlePathInfoDtos: getPlayerBattlePathInfoDtos,
+    getPlayerBattlePathInfoDto: getPlayerBattlePathInfoDto,
     playerBattlePathNextTurn: playerBattlePathNextTurn
 };
 

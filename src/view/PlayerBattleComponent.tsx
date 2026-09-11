@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import PlayerBattleService, { PlayerBattleNextTurnRequest } from "../api/PlayerBattleService";
-import { PlayerBattleInfoDto, PlayerBattlePathInfoDto } from "../type/type";
+import {useEffect, useState} from "react";
+import {useParams} from "react-router-dom";
+import PlayerBattleService, {PlayerBattleNextTurnRequest} from "../api/PlayerBattleService";
+import {PlayerBattleInfoDto} from "../type/type";
 
 type AnimatedMove = {
     id: string;
@@ -24,33 +24,20 @@ type AnimatedMove = {
 
 type AnimationPhase = {
     moves: AnimatedMove[];
-    renderData: PlayerBattlePathInfoDto[];
+    renderData: PlayerBattleInfoDto;
 };
 
 type GroupInfoDto = NonNullable<
-    PlayerBattlePathInfoDto["nodeDtos"][number]["groupInfoDtos"]
+    PlayerBattleInfoDto["pathDtos"][number]["nodeDtos"][number]["groupInfoDtos"]
 >[number];
 type UnplacedGroupDto = PlayerBattleInfoDto["unplacedGroupDtos"][number];
-type NodeDto = PlayerBattlePathInfoDto["nodeDtos"][number];
-type EdgeDto = PlayerBattlePathInfoDto["edgeDtos"][number];
-
-const getPathDtos = (
-    battleInfo: PlayerBattleInfoDto | PlayerBattlePathInfoDto[] | undefined
-) => {
-    if (Array.isArray(battleInfo)) {
-        return battleInfo;
-    }
-
-    return battleInfo?.pathDtos ?? [];
-};
+type PathDto = PlayerBattleInfoDto["pathDtos"][number];
+type NodeDto = PlayerBattleInfoDto["pathDtos"][number]["nodeDtos"][number];
+type EdgeDto = PlayerBattleInfoDto["pathDtos"][number]["edgeDtos"][number];
 
 const getUnplacedGroupDtos = (
-    battleInfo: PlayerBattleInfoDto | PlayerBattlePathInfoDto[] | undefined
+    battleInfo: PlayerBattleInfoDto | undefined
 ) => {
-    if (Array.isArray(battleInfo)) {
-        return [];
-    }
-
     return battleInfo?.unplacedGroupDtos ?? [];
 };
 
@@ -83,17 +70,21 @@ const getGroupCount = (
     )?.count ?? 0;
 
 export function PlayerBattleComponent() {
-    const { playerId } = useParams<"playerId">();
-
-    const [data, setData] = useState<PlayerBattlePathInfoDto[]>([]);
+    const {playerId} = useParams<"playerId">();
+    const initialPlayerBattleInfo: PlayerBattleInfoDto = {
+        turnCount: 0,
+        pathDtos: [],
+        unplacedGroupDtos: []
+    };
+    const [data, setData] = useState<PlayerBattleInfoDto>(initialPlayerBattleInfo);
     const [unplacedGroups, setUnplacedGroups] = useState<UnplacedGroupDto[]>([]);
     const [unitPlacements, setUnitPlacements] = useState<
         PlayerBattleNextTurnRequest["unitPlacementDtos"]
     >([]);
     const [selectedUnplacedGroupIndex, setSelectedUnplacedGroupIndex] = useState<number | null>(null);
-    const [prevData, setPrevData] = useState<PlayerBattlePathInfoDto[]>([]);
+    const [prevData, setPrevData] = useState<PlayerBattleInfoDto>(initialPlayerBattleInfo);
     const [movingUnits, setMovingUnits] = useState<AnimatedMove[]>([]);
-    const [pendingData, setPendingData] = useState<PlayerBattlePathInfoDto[] | null>(null);
+    const [pendingData, setPendingData] = useState<PlayerBattleInfoDto | null>(null);
     const [queuedTurnMovePhases, setQueuedTurnMovePhases] = useState<AnimationPhase[]>([]);
     const [animationStartedAt, setAnimationStartedAt] = useState<number | null>(null);
 
@@ -109,9 +100,9 @@ export function PlayerBattleComponent() {
         (FIGHT_ANIMATION_DURATION_MS + POST_FIGHT_MOVE_ANIMATION_DURATION_MS);
 
     useEffect(() => {
-        PlayerBattleService.getPlayerBattlePathInfoDtos(playerId ?? "")
+        PlayerBattleService.getPlayerBattlePathInfoDto(playerId ?? "")
             .then(res => {
-                setData(getPathDtos(res.data));
+                setData(res.data);
                 setUnplacedGroups(getUnplacedGroupDtos(res.data));
                 setUnitPlacements([]);
                 setSelectedUnplacedGroupIndex(null);
@@ -120,19 +111,36 @@ export function PlayerBattleComponent() {
     }, [playerId]);
 
     const getDataBeforeMovements = (
-        resolvedData: PlayerBattlePathInfoDto[],
+        resolvedData: PlayerBattleInfoDto,
         moves: AnimatedMove[]
     ) => {
-        const dataBeforeMovements = resolvedData.map(path => ({
-            ...path,
-            nodeDtos: (path.nodeDtos ?? []).map(node => ({
-                ...node,
-                groupInfoDtos: (node.groupInfoDtos ?? []).map(group => ({ ...group }))
+        const dataBeforeMovements: PlayerBattleInfoDto = {
+            ...resolvedData,
+            pathDtos: resolvedData.pathDtos.map(pathDto => ({
+                ...pathDto,
+                nodeDtos: pathDto.nodeDtos.map(nodeDto => ({
+                    ...nodeDto,
+                    groupInfoDtos: (nodeDto.groupInfoDtos ?? []).map(groupInfoDto => ({
+                        ...groupInfoDto,
+                        unitTypeDto: {
+                            ...groupInfoDto.unitTypeDto
+                        }
+                    }))
+                }))
+            })),
+            unplacedGroupDtos: resolvedData.unplacedGroupDtos.map(unplacedGroup => ({
+                ...unplacedGroup,
+                groupInfoDto: {
+                    ...unplacedGroup.groupInfoDto,
+                    unitTypeDto: {
+                        ...unplacedGroup.groupInfoDto.unitTypeDto
+                    }
+                }
             }))
-        }));
+        };
         const nodesById = new Map<string, NodeDto>(
-            dataBeforeMovements.flatMap(path =>
-                (path.nodeDtos ?? []).map(node => [node.id, node] as [string, NodeDto])
+            dataBeforeMovements.pathDtos.flatMap(pathDto =>
+                pathDto.nodeDtos.map(nodeDto => [nodeDto.id, nodeDto] as [string, NodeDto])
             )
         );
 
@@ -159,7 +167,7 @@ export function PlayerBattleComponent() {
             } else {
                 fromNode.groupInfoDtos = [
                     ...(fromNode.groupInfoDtos ?? []),
-                    { ...arrivingGroup, count: move.amount }
+                    {...arrivingGroup, count: move.amount}
                 ];
             }
 
@@ -181,7 +189,7 @@ export function PlayerBattleComponent() {
             unitPlacementDtos: placementsForTurn
         })
             .then(res => {
-                const newData = getPathDtos(res.data);
+                const newData = res.data;
                 const placementMoves = generatePlacementMovements(placementsForTurn);
                 const moves = generateMovements(placementStartData, newData);
                 const fightMoves = moves.filter(move => move.fightOpponents?.length);
@@ -189,10 +197,10 @@ export function PlayerBattleComponent() {
                 const turnStartData = placementMoves.length > 0 ? placementStartData : data;
                 const animationPhases: AnimationPhase[] = [
                     ...(placementMoves.length > 0
-                        ? [{ moves: placementMoves, renderData: data }]
+                        ? [{moves: placementMoves, renderData: data}]
                         : []),
                     ...(fightMoves.length > 0
-                        ? [{ moves: fightMoves, renderData: turnStartData }]
+                        ? [{moves: fightMoves, renderData: turnStartData}]
                         : []),
                     ...(movementMoves.length > 0
                         ? [{
@@ -223,51 +231,65 @@ export function PlayerBattleComponent() {
     };
 
     const addPlacedGroupsToData = (
-        currentData: PlayerBattlePathInfoDto[],
+        currentData: PlayerBattleInfoDto,
         placements: PlayerBattleNextTurnRequest["unitPlacementDtos"]
-    ) =>
-        currentData.map(path => ({
-            ...path,
-            nodeDtos: (path.nodeDtos ?? []).map(node => {
-                const placement = placements.find(item => item.nodeId === node.id);
-                const placedGroup = placement
-                    ? unplacedGroups.find(
-                        group => group.groupInfoDto.id === placement.unplacedGroupInfoId
-                    )
-                    : undefined;
-
-                if (!placedGroup) {
-                    return node;
-                }
-
-                const existingGroup = (node.groupInfoDtos ?? []).find(
-                    group =>
-                        group.unitTypeDto.name === placedGroup.groupInfoDto.unitTypeDto.name &&
-                        group.owner === placedGroup.groupInfoDto.owner
-                );
-
-                return {
-                    ...node,
-                    groupInfoDtos: existingGroup
-                        ? (node.groupInfoDtos ?? []).map(group =>
-                            group === existingGroup
-                                ? { ...group, count: group.count + placedGroup.count }
-                                : group
+    ) => {
+        const data: PlayerBattleInfoDto = {
+            ...currentData,
+            pathDtos: currentData.pathDtos.map(path => ({
+                ...path,
+                nodeDtos: (path.nodeDtos ?? []).map(node => {
+                    const placement = placements.find(item => item.nodeId === node.id);
+                    const placedGroup = placement
+                        ? unplacedGroups.find(
+                            group => group.groupInfoDto.id === placement.unplacedGroupInfoId
                         )
-                        : [
-                            ...(node.groupInfoDtos ?? []),
-                            { ...placedGroup.groupInfoDto, count: placedGroup.count }
-                        ]
-                };
-            })
-        }));
+                        : undefined;
+
+                    if (!placedGroup) {
+                        return node;
+                    }
+
+                    const existingGroup = (node.groupInfoDtos ?? []).find(
+                        group =>
+                            group.unitTypeDto.name === placedGroup.groupInfoDto.unitTypeDto.name &&
+                            group.owner === placedGroup.groupInfoDto.owner
+                    );
+
+                    return {
+                        ...node,
+                        groupInfoDtos: existingGroup
+                            ? (node.groupInfoDtos ?? []).map(group =>
+                                group === existingGroup
+                                    ? {...group, count: group.count + placedGroup.count}
+                                    : group
+                            )
+                            : [
+                                ...(node.groupInfoDtos ?? []),
+                                {...placedGroup.groupInfoDto, count: placedGroup.count}
+                            ]
+                    };
+                })
+            })),
+            unplacedGroupDtos: currentData.unplacedGroupDtos.map(unplacedGroup => ({
+                ...unplacedGroup,
+                groupInfoDto: {
+                    ...unplacedGroup.groupInfoDto,
+                    unitTypeDto: {
+                        ...unplacedGroup.groupInfoDto.unitTypeDto
+                    }
+                }
+            }))
+        };
+        return data;
+    };
 
     const generatePlacementMovements = (
         placements: PlayerBattleNextTurnRequest["unitPlacementDtos"]
     ) => {
         const moves: AnimatedMove[] = [];
 
-        data.forEach(path => {
+        data?.pathDtos.forEach(path => {
             path.nodeDtos?.forEach(node => {
                 const placement = placements.find(item => item.nodeId === node.id);
                 const group = placement
@@ -283,8 +305,8 @@ export function PlayerBattleComponent() {
 
                 moves.push({
                     id: `placement-${group.groupInfoDto.id}`,
-                    from: { x: node.xCoordinate, y: node.yCoordinate + 0.7 },
-                    to: { x: node.xCoordinate, y: node.yCoordinate },
+                    from: {x: node.xCoordinate, y: node.yCoordinate + 0.7},
+                    to: {x: node.xCoordinate, y: node.yCoordinate},
                     progress: 0,
                     durationMs: MOVE_ANIMATION_DURATION_MS,
                     unitTypeName: group.groupInfoDto.unitTypeDto.name,
@@ -302,13 +324,13 @@ export function PlayerBattleComponent() {
 
     // DETECT MOVEMENTS
     const generateMovements = (
-        oldData: PlayerBattlePathInfoDto[],
-        newData: PlayerBattlePathInfoDto[]
+        oldData: PlayerBattleInfoDto,
+        newData: PlayerBattleInfoDto
     ) => {
         const moves: AnimatedMove[] = [];
 
-        oldData.forEach((oldPath, pathIndex) => {
-            const newPath = newData[pathIndex];
+        oldData?.pathDtos.forEach((oldPath, pathIndex) => {
+            const newPath = newData?.pathDtos[pathIndex];
             const oldNodesById = new Map<string, NodeDto>(
                 oldPath.nodeDtos?.map(node => [node.id, node]) ?? []
             );
@@ -399,7 +421,7 @@ export function PlayerBattleComponent() {
         return moves;
     };
 
-    const isBottomNode = (path: PlayerBattlePathInfoDto, node: NodeDto) => {
+    const isBottomNode = (path: PathDto, node: NodeDto) => {
         const maxYCoordinate = Math.max(
             ...(path.nodeDtos ?? []).map(pathNode => pathNode.yCoordinate)
         );
@@ -531,7 +553,7 @@ export function PlayerBattleComponent() {
     // subtract moving units from source
     const getVisibleUnits = (node: any) => {
         let units: GroupInfoDto[] = node.groupInfoDtos
-            ? node.groupInfoDtos.map((unit: GroupInfoDto) => ({ ...unit }))
+            ? node.groupInfoDtos.map((unit: GroupInfoDto) => ({...unit}))
             : [];
         const hiddenFightDefenders = new Map<string, number>();
 
@@ -610,7 +632,7 @@ export function PlayerBattleComponent() {
     };
 
     const renderData = movingUnits.length > 0 ? prevData : data;
-    const pathsToRender = Array.isArray(renderData) ? renderData : [];
+    const pathsToRender = renderData?.pathDtos ?? [];
     const svgHeight =
         pathsToRender.length === 0
             ? 240
@@ -628,8 +650,8 @@ export function PlayerBattleComponent() {
         pendingData === null;
 
     return (
-        <div style={{ textAlign: "center", paddingTop: "20px" }}>
-            <h2 style={{ marginBottom: "20px" }}>
+        <div style={{textAlign: "center", paddingTop: "20px"}}>
+            <h2 style={{marginBottom: "20px"}}>
                 Player: {playerId}
             </h2>
 
@@ -640,12 +662,12 @@ export function PlayerBattleComponent() {
                     pendingData !== null ||
                     queuedTurnMovePhases.length > 0
                 }
-                style={{ marginBottom: "20px" }}
+                style={{marginBottom: "20px"}}
             >
                 Next Turn
             </button>
 
-            <svg width={1600} height={svgHeight} style={{ border: "1px solid #ccc" }}>
+            <svg width={1600} height={svgHeight} style={{border: "1px solid #ccc"}}>
                 {pathsToRender.map((path, pathIndex) => (
                     <g key={pathIndex}>
                         {(path.edgeDtos ?? []).map((edge, i) => {
@@ -978,12 +1000,12 @@ export function PlayerBattleComponent() {
                     textAlign: "left"
                 }}
             >
-                <h3 style={{ margin: "0 0 12px" }}>Unplaced groups</h3>
+                <h3 style={{margin: "0 0 12px"}}>Unplaced groups</h3>
 
                 {unplacedGroups.length === 0 ? (
-                    <div style={{ color: "#666" }}>No unplaced groups</div>
+                    <div style={{color: "#666"}}>No unplaced groups</div>
                 ) : (
-                    <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                    <div style={{display: "flex", gap: "12px", flexWrap: "wrap"}}>
                         {unplacedGroups.map((unplacedGroup, index) => {
                             if (
                                 unitPlacements.some(
@@ -1027,7 +1049,7 @@ export function PlayerBattleComponent() {
                                         alt={group.unitTypeDto.name}
                                         width={28}
                                         height={28}
-                                        style={{ objectFit: "cover" }}
+                                        style={{objectFit: "cover"}}
                                     />
                                     <span>
                                         {group.unitTypeDto.name} x{unplacedGroup.count}
